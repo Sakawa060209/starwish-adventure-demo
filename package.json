@@ -1,0 +1,10 @@
+{
+  "name": "starwish-adventure-demo",
+  "version": "0.1.0",
+  "private": true,
+  "description": "《星愿物语：少女冒险团》零构建浏览器Demo",
+  "scripts": {
+    "test": "node --test tests/logic.test.js",
+    "smoke": "node tests/browser-smoke.cjs"
+  }
+}
