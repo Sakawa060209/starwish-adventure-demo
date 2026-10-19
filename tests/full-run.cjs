@@ -56,6 +56,7 @@ async function optimizeParty(page) {
   await page.locator("#speedButton").click();
   await page.locator("#speedButton").click();
   let reachedBossClear = false;
+  let capturedBoss = false;
   let optimized = false;
   let previousStatus = "";
   for (let attempt = 0; attempt < 72; attempt++) {
@@ -71,6 +72,12 @@ async function optimizeParty(page) {
       await optimizeParty(page);
       optimized = true;
     }
+    if (!capturedBoss && await page.locator("#bossBar:not([hidden])").count()) {
+      const phase = await page.locator("#bossPhase").textContent();
+      if (!/阶段|蓄力/.test(phase)) throw new Error("Boss phase label is missing");
+      await page.screenshot({ path: path.join(root, "tests", "full-run-boss-battle.png"), fullPage: true });
+      capturedBoss = true;
+    }
     if (status.boss) { reachedBossClear = true; break; }
   }
   if (!reachedBossClear) throw new Error("Natural run did not clear stage 10 within six minutes");
@@ -80,6 +87,7 @@ async function optimizeParty(page) {
   });
   if (errors.length) throw new Error(`Browser errors: ${errors.join(" | ")}`);
   if (result.firstClears !== 10) throw new Error(`Only ${result.firstClears}/10 first clears recorded`);
+  if (!capturedBoss) throw new Error("Natural run never exposed the dedicated boss presentation");
   await page.screenshot({ path: path.join(root, "tests", "full-run-boss-reward.png"), fullPage: true });
   console.log(`Full natural run passed: ${JSON.stringify(result)}`);
   await browser.close(); server.close();

@@ -41,6 +41,8 @@
     synergyCd: 0,
     guardComboCd: 0,
     guardWindow: 0,
+    hitStop: 0,
+    screenShake: 0,
     report: null
   };
 
@@ -93,10 +95,12 @@
 
   function showLoot(text, color) {
     const el = document.createElement("div");
-    el.className = "loot-pop";
+    const legendary = color === L.qualityById("legendary").color;
+    el.className = `loot-pop${legendary ? " legendary" : ""}`;
     el.textContent = text;
     el.style.color = color || "white";
     $("#lootFloat").appendChild(el);
+    if (legendary) { addEffect("synergy", 585, 235, "", "#ffe37a", 1.2); game.heroes.filter(h => !h.down).forEach(h => { h.action = "victory"; h.actionT = Math.max(h.actionT, 1.4); }); }
     setTimeout(() => el.remove(), 1700);
   }
 
@@ -148,6 +152,8 @@
     game.synergyCd = 0;
     game.guardComboCd = 0;
     game.guardWindow = 0;
+    game.hitStop = 0;
+    game.screenShake = 0;
     game.report = freshReport();
     game.running = true;
     game.paused = false;
@@ -203,6 +209,16 @@
     if (game.effects.length > 70) game.effects.splice(0, game.effects.length - 70);
   }
 
+  function addDamageEffect(enemy, amount, crit) {
+    const existing = game.effects.find(e => e.type === "text" && e.targetUid === enemy.uid && e.t > .48);
+    if (existing) {
+      existing.value += amount; existing.text = `${crit || existing.crit ? "✦ " : ""}${existing.value}`; existing.crit = existing.crit || crit; existing.color = existing.crit ? "#ffe680" : "#fff"; existing.t = existing.life = .72;
+      return;
+    }
+    const effect = { type: "text", targetUid: enemy.uid, value: amount, crit, x: enemy.x, y: GROUND - 72, text: `${crit ? "✦ " : ""}${amount}`, color: crit ? "#ffe680" : "#fff", t: .72, life: .72 };
+    game.effects.push(effect);
+  }
+
   function applyEnemyDamage(hero, enemy, multiplier, opts) {
     if (!enemy || enemy.dead) return 0;
     opts = opts || {};
@@ -221,11 +237,13 @@
     }
     if (amount > 0) {
       enemy.hp = Math.max(0, enemy.hp - amount);
+      if (!enemy.dead && enemy.action !== "attack") { enemy.action = "hurt"; enemy.actionT = .16; }
       hero.damageDone += amount;
       if (game.report) game.report.damageByHero[hero.id] += amount;
       enemy.recentHitters[hero.id] = game.stageTime;
-      addEffect("text", enemy.x, GROUND - 72, `${crit ? "✦ " : ""}${amount}`, crit ? "#ffe06a" : "#fff", .72);
+      addDamageEffect(enemy, amount, crit);
       addEffect("spark", enemy.x - 6, GROUND - 56, "", opts.magic ? "#b69cff" : "#ecf7ff", .35);
+      if (crit) { game.hitStop = Math.max(game.hitStop, .045); game.screenShake = Math.max(game.screenShake, 3); }
     }
     const recentTeam = Object.values(enemy.recentHitters || {}).filter(at => game.stageTime - at <= 5).length;
     if (!opts.noCombo && enemy.hp > 0 && enemy.breakT > 0 && enemy.starT > 0 && recentTeam >= 2 && game.synergyCd <= 0) {
@@ -242,7 +260,7 @@
   function shoot(hero, enemy, multiplier, type, count) {
     for (let i = 0; i < (count || 1); i++) {
       game.projectiles.push({
-        owner: hero, target: enemy, x: hero.x + 18, y: GROUND - 58 - i * 3,
+        owner: hero, target: enemy, x: hero.x + (hero.id === "archer" ? 34 : 28), y: GROUND - (hero.id === "archer" ? 46 : 48) - i * 3,
         speed: type === "arrow" ? 360 : 285,
         multiplier, type, alive: true, delay: i * .1
       });
@@ -250,7 +268,7 @@
   }
 
   function normalAttack(hero, target) {
-    hero.action = "attack"; hero.actionT = .42;
+    hero.action = "attack"; hero.actionT = .58;
     hero.atkCd = hero.stats.interval;
     hero.attackCount++;
     if (hero.id === "archer") {
@@ -263,6 +281,8 @@
       shoot(hero, target, 1, "magic");
     } else {
       applyEnemyDamage(hero, target, hero.empowered ? 1.15 : 1);
+      if (hero.id === "knight") addEffect("slash", target.x - 18, GROUND - 48, "", "#dff6ff", .28);
+      if (hero.id === "lancer") addEffect("thrust", target.x - 48, GROUND - 43, "", "#fff2df", .24);
       if (hero.id === "lancer" && game.guardWindow > 0 && game.guardComboCd <= 0 && !target.dead) {
         game.guardComboCd = 10;
         game.guardWindow = 0;
@@ -287,7 +307,8 @@
 
   function castSkill(hero, target) {
     const level = state.skills[hero.id] || 1;
-    hero.action = "skill"; hero.actionT = .72;
+    hero.action = "skill"; hero.actionT = .86;
+    game.hitStop = Math.max(game.hitStop, .03);
     hero.skillCd = hero.stats.skillCd;
     if (game.report) game.report.skillsByHero[hero.id]++;
     const multiplier = hero.def.skillBase + .15 * (level - 1);
@@ -331,6 +352,7 @@
     hero.damageTaken += amount;
     if (game.report) game.report.takenByHero[hero.id] += amount;
     hero.action = "hurt"; hero.actionT = .25;
+    game.screenShake = Math.max(game.screenShake, special ? 4 : 1.5);
     addEffect("text", hero.x, GROUND - 75, `-${amount}`, "#ffb2b8", .65);
     if (hero.stats.counter && hero.counterCd <= 0 && L.rngNext(state) < .15 && attacker && !attacker.dead) {
       applyEnemyDamage(hero, attacker, .5, { noCrit: true });
@@ -402,6 +424,7 @@
   function updateEnemy(enemy, dt) {
     if (enemy.dead) { enemy.actionT -= dt; return; }
     enemy.actionT -= dt;
+    if (enemy.actionT <= 0 && ["hurt", "attack", "enter"].includes(enemy.action)) enemy.action = "idle";
     enemy.atkCd -= dt; enemy.specialCd -= dt; enemy.breakT -= dt; enemy.starT -= dt;
     if (enemy.def.id === "mushroom" && enemy.specialCd <= 0) {
       enemy.shield += enemy.maxHp * .15; enemy.specialCd = 12;
@@ -431,6 +454,7 @@
       if (enemy.windup > 0) {
         enemy.windup -= dt;
         if (enemy.windup <= 0 && enemy.windupTarget && !enemy.windupTarget.down) {
+          enemy.action = "attack"; enemy.actionT = .42;
           hurtHero(enemy.windupTarget, enemy.atk, enemy, true);
           enemy.windupTarget = null;
         }
@@ -439,6 +463,7 @@
         if (target) {
           enemy.windup = 1.2;
           enemy.windupTarget = target;
+          enemy.action = "windup";
           addEffect("vine", target.x, GROUND - 24, "花藤打击", "#8ae08e", 1.2);
           addFeed("花冠鹿灵正在蓄力花藤打击", "boss");
         }
@@ -581,7 +606,9 @@
 
   function update(dt) {
     if (!game.running || game.paused) return;
+    if (game.hitStop > 0) { game.hitStop -= dt; updateEffects(dt * .3); return; }
     game.stageTime += dt;
+    game.screenShake = Math.max(0, game.screenShake - dt * 18);
     game.synergyCd -= dt; game.guardComboCd -= dt; game.guardWindow -= dt;
     updateEffects(dt);
     if (game.phase === "march") {
@@ -613,7 +640,7 @@
   function drawBackground(time) {
     const w = canvas.width, h = canvas.height;
     const grad = ctx.createLinearGradient(0, 0, 0, h);
-    grad.addColorStop(0, "#7fd3ee"); grad.addColorStop(.57, "#dff6dc"); grad.addColorStop(1, "#9acd70");
+    grad.addColorStop(0, "#83cfe2"); grad.addColorStop(.38, "#bde4df"); grad.addColorStop(.7, "#e5f1d6"); grad.addColorStop(1, "#b7d19a");
     ctx.fillStyle = grad; ctx.fillRect(0, 0, w, h);
     const sun = ctx.createRadialGradient(128, 76, 8, 128, 76, 105);
     sun.addColorStop(0, "rgba(255,250,190,.95)"); sun.addColorStop(.3, "rgba(255,239,155,.34)"); sun.addColorStop(1, "rgba(255,255,255,0)");
@@ -621,43 +648,49 @@
     const cloudOffset = -(game.world * .08) % 260;
     for (let i = -1; i < 6; i++) {
       const x = cloudOffset + i * 240 + (i % 2) * 45;
-      drawPixel(x, 74 + (i % 3) * 24, 70, 18, "rgba(255,255,255,.72)");
-      drawPixel(x + 18, 60 + (i % 3) * 24, 42, 18, "rgba(255,255,255,.72)");
-      drawPixel(x + 56, 80 + (i % 3) * 24, 38, 12, "rgba(255,255,255,.72)");
+      const cy = 74 + (i % 3) * 24;
+      drawPixel(x, cy, 70, 14, "rgba(247,252,238,.74)");
+      drawPixel(x + 18, cy - 14, 42, 15, "rgba(255,255,247,.78)");
+      drawPixel(x + 56, cy + 5, 38, 9, "rgba(231,245,233,.66)");
     }
     const far = -(game.world * .15) % 320;
-    ctx.fillStyle = "#9fd3ad";
+    ctx.fillStyle = "#a9cfc0";
     for (let i = -2; i < 6; i++) {
       ctx.beginPath(); ctx.moveTo(far + i * 240, 320); ctx.lineTo(far + i * 240 + 130, 160 + (i % 2) * 20); ctx.lineTo(far + i * 240 + 280, 320); ctx.fill();
     }
     const ruin = 610 - (game.world * .12 % 1250);
-    drawPixel(ruin, 230, 18, 104, "#9eb7a2"); drawPixel(ruin + 70, 246, 17, 88, "#91ad98");
-    drawPixel(ruin - 8, 220, 105, 13, "#bfd0b1"); drawPixel(ruin + 24, 246, 37, 88, "rgba(210,230,195,.62)");
+    drawPixel(ruin, 230, 18, 104, "#a7bbaa"); drawPixel(ruin + 70, 246, 17, 88, "#9fb3a3");
+    drawPixel(ruin - 8, 220, 105, 13, "#c2d1b7"); drawPixel(ruin + 24, 246, 37, 88, "rgba(218,230,202,.58)");
     const hills = -(game.world * .28) % 190;
-    ctx.fillStyle = "#70bd80";
+    ctx.fillStyle = "#82bc8f";
     for (let i = -2; i < 8; i++) {
       ctx.beginPath(); ctx.arc(hills + i * 170, 326, 120, Math.PI, 0); ctx.fill();
     }
     const trees = -(game.world * .48) % 180;
     for (let i = -1; i < 8; i++) {
       const x = trees + i * 170 + (i % 2) * 33;
-      drawPixel(x, 260, 16, 74, "#6f8c55");
-      drawPixel(x - 26, 226, 68, 54, i % 3 ? "#5fa967" : "#73b86b");
-      drawPixel(x - 12, 208, 42, 36, "#82c67b");
+      drawPixel(x, 257, 17, 77, "#708760"); drawPixel(x + 4, 257, 6, 77, "#91a874");
+      const leafDark = i % 3 ? "#4f9363" : "#5a9b66";
+      drawPixel(x - 32, 232, 74, 42, leafDark); drawPixel(x - 18, 215, 58, 42, "#65aa70");
+      drawPixel(x - 8, 202, 39, 31, "#78b77a"); drawPixel(x - 27, 225, 25, 15, "#82be7d");
+      drawPixel(x + 22, 236, 17, 22, "#417f59"); drawPixel(x - 3, 207, 20, 7, "#96ca8a");
     }
     const mill = 850 - (game.world * .35 % 1350);
     drawPixel(mill, 254, 44, 80, "#eadbb6"); drawPixel(mill - 8, 244, 60, 13, "#a77d62"); drawPixel(mill + 18, 276, 10, 58, "#8b654c");
     ctx.save(); ctx.translate(mill + 22, 250); ctx.rotate(time * .18); for (let i = 0; i < 4; i++) { ctx.rotate(Math.PI / 2); drawPixel(0, -3, 52, 7, "#f1e7cd"); drawPixel(34, -7, 18, 14, "rgba(247,239,215,.8)"); } ctx.restore();
-    drawPixel(0, 334, w, 60, "#72bf63");
-    drawPixel(0, 354, w, 40, "#8dd16f");
-    drawPixel(0, GROUND, w, h - GROUND, "#c39a61");
-    drawPixel(0, GROUND + 18, w, h - GROUND - 18, "#d6b374");
+    drawPixel(0, 334, w, 60, "#62ae60");
+    drawPixel(0, 354, w, 40, "#79c866");
+    drawPixel(0, 381, w, 13, "#a3d975");
+    drawPixel(0, GROUND, w, h - GROUND, "#a97f52");
+    drawPixel(0, GROUND + 9, w, h - GROUND - 9, "#c69b63");
+    drawPixel(0, GROUND + 24, w, h - GROUND - 24, "#d3ae72");
     const near = -(game.world * .8) % 72;
     for (let i = -1; i < 16; i++) {
       const x = near + i * 72;
       drawPixel(x, GROUND - 10, 5, 10, i % 3 === 0 ? "#ffdf70" : "#f58da8");
       drawPixel(x + 5, GROUND - 7, 8, 3, "#479e56");
-      drawPixel(x + 34, GROUND + 32, 22, 4, "rgba(126,83,49,.2)");
+      drawPixel(x + 34, GROUND + 32, 22, 4, "rgba(99,67,45,.22)");
+      drawPixel(x + 15, GROUND + 67, 8, 5, "rgba(255,229,168,.2)");
     }
     for (let i = 0; i < 9; i++) {
       const px = (i * 137 - game.world * (.55 + i * .02)) % 1100;
@@ -671,11 +704,21 @@
   }
 
   function drawHero(hero, time) {
-    const bob = hero.action === "run" ? Math.round(Math.sin(time * 13 + hero.homeX) * 3) : Math.round(Math.sin(time * 3.2 + hero.homeX) * 1.5);
-    const strike = hero.action === "attack" || hero.action === "skill";
-    const leg = hero.action === "run" ? Math.round(Math.sin(time * 13 + hero.homeX) * 5) : 0;
+    const runFrame = Math.floor((time * 10 + hero.homeX * .017) % 8);
+    const runSteps = [-6, -4, 0, 4, 6, 4, 0, -4];
+    const runLift = [0, 2, 3, 1, 0, 2, 3, 1];
+    const actionMax = hero.action === "skill" ? .86 : .58;
+    const actionProgress = hero.action === "attack" || hero.action === "skill" ? 1 - Math.max(0, hero.actionT) / actionMax : 0;
+    const attackFrame = actionProgress < .2 ? 0 : actionProgress < .38 ? 1 : actionProgress < .5 ? 2 : actionProgress < .61 ? 3 : actionProgress < .69 ? 4 : actionProgress < .82 ? 5 : actionProgress < .93 ? 6 : 7;
+    const strike = (hero.action === "attack" || hero.action === "skill") && attackFrame >= 2 && attackFrame <= 4;
+    const windup = (hero.action === "attack" || hero.action === "skill") && attackFrame < 2;
+    const victory = hero.action === "victory";
+    const bob = hero.action === "run" ? runLift[runFrame] - 2 : victory ? Math.round(Math.abs(Math.sin(time * 4 + hero.homeX)) * -3) : Math.round(Math.sin(time * 3.2 + hero.homeX) * 1.2);
+    const leg = hero.action === "run" ? runSteps[runFrame] : strike ? (hero.id === "lancer" ? 7 : 3) : windup ? -3 : 0;
+    const clothLag = hero.action === "run" ? runSteps[(runFrame + 6) % 8] : strike ? -6 : 0;
     const recoil = hero.action === "hurt" ? -4 : 0;
     ctx.save(); ctx.translate(Math.round(hero.x) + recoil, GROUND + bob); ctx.scale(1.06, 1.06);
+    if (strike) { ctx.translate(hero.id === "lancer" ? 6 : hero.id === "archer" ? -2 : 3, 0); ctx.rotate(hero.id === "knight" ? -.045 : hero.id === "lancer" ? -.025 : hero.id === "mage" ? .025 : 0); }
     if (hero.down) { ctx.rotate(Math.PI / 2.55); ctx.translate(0, 13); }
     ctx.globalAlpha = hero.down ? .55 : 1;
     drawPixel(-24, -3, 50, 7, "rgba(42,59,65,.24)");
@@ -684,35 +727,46 @@
     if (hero.id === "mage") {
       legs("#51428d", "#ece7ff");
       drawPixel(-17, -50, 34, 30, outline); drawPixel(-14, -48, 28, 26, "#7563c7"); drawPixel(-12, -46, 7, 21, "#a995ec");
+      drawPixel(-14, -31, 28, 5, "#51428d"); drawPixel(-11, -25, 8, 5, "#9280dc"); drawPixel(3, -25, 8, 5, "#6652b1");
       drawPixel(-16, -66, 31, 22, skin); drawPixel(-18, -73, 35, 16, "#a995e5"); drawPixel(-19, -65, 9, 24, "#8a72d1"); drawPixel(10, -64, 8, 26, "#765fb9");
       drawPixel(-13, -63, 8, 5, light); drawPixel(8, -60, 4, 4, "#3c4770");
       drawPixel(-17, -82, 38, 9, outline); drawPixel(-12, -91, 28, 12, outline); drawPixel(-9, -89, 23, 9, "#6c5bbb"); drawPixel(13, -96, 8, 16, "#9c83e0");
-      const float = strike ? 8 : 0; drawPixel(19 + float, -49, 25, 20, outline); drawPixel(22 + float, -46, 8, 14, "#e8ddff"); drawPixel(33 + float, -46, 8, 14, "#b7d7ff");
-      if (hero.action === "skill") for (let i = 0; i < 4; i++) drawPixel(19 + i * 10, -83 - (i % 2) * 8, 6, 6, i % 2 ? "#9ee8ff" : "#f4ddff");
+      drawPixel(-20 - clothLag * .35, -42, 7, 24, "#5b4aa7");
+      drawPixel(10, -46, 12, 9, "#6553b5"); drawPixel(18, -42, 9, 6, skin); drawPixel(22, -41, 7, 3, light);
+      const float = strike ? 12 : windup ? -3 : 0; drawPixel(19 + float, -49 - (hero.action === "skill" ? 4 : 0), 25, 20, outline); drawPixel(22 + float, -46 - (hero.action === "skill" ? 4 : 0), 8, 14, "#e8ddff"); drawPixel(33 + float, -46 - (hero.action === "skill" ? 4 : 0), 8, 14, "#b7d7ff");
+      if (hero.action === "skill" || victory) for (let i = 0; i < 4; i++) drawPixel(19 + i * 10, -83 - (i % 2) * 8, 6, 6, i % 2 ? "#9ee8ff" : "#f4ddff");
     } else if (hero.id === "archer") {
       legs("#4d6d4e", "#dff6d9");
       drawPixel(-20, -51, 34, 31, outline); drawPixel(-17, -48, 28, 27, "#3f9f63"); drawPixel(-17, -48, 8, 26, "#71ca89"); drawPixel(-22, -43, 9, 24, "#2f704a");
+      drawPixel(-17, -31, 28, 5, "#745a3d"); drawPixel(-14, -26, 10, 6, "#66bd7e"); drawPixel(2, -26, 9, 6, "#2e8050");
       drawPixel(-17, -67, 31, 23, skin); drawPixel(-20, -73, 35, 17, "#66bf81"); drawPixel(-21, -66, 9, 24, "#4da66c");
       drawPixel(-15, -64, 8, 5, light); drawPixel(7, -61, 4, 4, "#385268");
       drawPixel(-17, -80, 27, 9, "#397f52"); drawPixel(-9, -85, 24, 9, "#75cc8e");
-      drawPixel(-25, -67, 9, 8, "#85dc99"); drawPixel(-32, -63, 14, 7, "#5eaf74");
-      ctx.strokeStyle = "#82572f"; ctx.lineWidth = 5; ctx.beginPath(); ctx.arc(28 + (strike ? 7 : 0), -43, 22, -1.25, 1.25); ctx.stroke();
-      ctx.strokeStyle = "#f4fff0"; ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(35 + (strike ? 7 : 0), -63); ctx.lineTo(strike ? 12 : 27, -43); ctx.lineTo(35 + (strike ? 7 : 0), -22); ctx.stroke();
+      drawPixel(-24, -54, 9, 25, "#775039"); drawPixel(-28, -49, 7, 17, "#c18d56");
+      drawPixel(9, -48, 12, 8, "#368854"); drawPixel(17, -45, 11, 6, skin); drawPixel(24, -44, 7, 3, light);
+      drawPixel(-25 - clothLag * .35, -67, 9, 8, "#85dc99"); drawPixel(-32 - clothLag * .7, -63, 14, 7, "#5eaf74");
+      const bowY = victory ? -9 : 0;
+      ctx.strokeStyle = "#82572f"; ctx.lineWidth = 5; ctx.beginPath(); ctx.arc(28 + (strike ? 7 : 0), -43 + bowY, 22, -1.25, 1.25); ctx.stroke();
+      ctx.strokeStyle = "#f4fff0"; ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(35 + (strike ? 7 : 0), -63 + bowY); ctx.lineTo(strike ? 12 : 27, -43 + bowY); ctx.lineTo(35 + (strike ? 7 : 0), -22 + bowY); ctx.stroke();
     } else if (hero.id === "lancer") {
       legs("#743d58", "#ffe5ed");
       drawPixel(-18, -51, 35, 31, outline); drawPixel(-15, -48, 29, 27, "#df6686"); drawPixel(-14, -46, 8, 22, "#f69db4"); drawPixel(-24, -33, 12, 8, "#f4b0c2");
+      drawPixel(-15, -31, 29, 5, "#8e405e"); drawPixel(-12, -25, 10, 5, "#f49ab1"); drawPixel(3, -25, 10, 5, "#c45173");
       drawPixel(-16, -67, 31, 23, skin); drawPixel(-19, -76, 35, 20, "#ed87a5"); drawPixel(-21, -66, 9, 27, "#d65f82");
       drawPixel(-12, -64, 8, 5, light); drawPixel(8, -61, 4, 4, "#4b4763");
       drawPixel(-12, -84, 8, 10, "#ffd0dc"); drawPixel(-6, -88, 8, 14, "#df6f91");
-      drawPixel(-25, -69, 10, 11, "#f4a4ba"); drawPixel(-35, -64, 17, 9, "#d85e82"); drawPixel(-42, -58, 14, 8, "#b84870");
-      const thrust = strike ? 18 : 0; drawPixel(6 + thrust, -45, 73, 5, "#f7e8cd"); drawPixel(5 + thrust, -44, 70, 2, "#fff9e9"); drawPixel(76 + thrust, -50, 16, 15, "#dc5e82"); drawPixel(88 + thrust, -46, 9, 7, "#ffb4c4");
+      drawPixel(7, -50, 13, 8, "#b94c70"); drawPixel(15, -47, 13, 6, skin); drawPixel(20, -40, 12, 6, skin);
+      drawPixel(-25 - clothLag * .25, -69, 10, 11, "#f4a4ba"); drawPixel(-35 - clothLag * .7, -64, 17, 9, "#d85e82"); drawPixel(-42 - clothLag, -58, 14, 8, "#b84870");
+      const thrust = strike ? 22 : windup ? -9 : victory ? -13 : 0; const spearY = victory ? -66 : windup ? -51 : -45; drawPixel(6 + thrust, spearY, 73, 5, "#f7e8cd"); drawPixel(5 + thrust, spearY + 1, 70, 2, "#fff9e9"); drawPixel(76 + thrust, spearY - 5, 16, 15, "#dc5e82"); drawPixel(88 + thrust, spearY - 1, 9, 7, "#ffb4c4");
     } else {
       legs("#435f85", "#edf7ff");
       drawPixel(-22, -50, 37, 30, outline); drawPixel(-19, -47, 31, 27, "#4f8fd0"); drawPixel(-17, -45, 9, 22, "#8dc7ef"); drawPixel(-25, -48, 9, 28, "#e8f5ff");
+      drawPixel(-19, -31, 31, 6, "#315d96"); drawPixel(-15, -25, 10, 5, "#7fc0ea"); drawPixel(2, -25, 10, 5, "#3b79b7");
       drawPixel(-17, -67, 31, 23, skin); drawPixel(-19, -75, 34, 18, "#d7e9f4"); drawPixel(-20, -66, 8, 22, "#b9d4e7"); drawPixel(10, -64, 7, 21, "#a8c7df");
       drawPixel(-14, -64, 8, 5, light); drawPixel(7, -61, 4, 4, "#354c68");
-      drawPixel(-23, -58, 12, 8, "#ffe176"); drawPixel(-28, -42, 17, 30, "#8ecdf1"); drawPixel(-25, -39, 11, 23, "#dff5ff");
-      const swing = strike ? -34 : -4; ctx.save(); ctx.translate(13, -39); ctx.rotate(swing * Math.PI / 180); drawPixel(0, -4, 46, 7, "#dcefff"); drawPixel(3, -3, 39, 2, "#ffffff"); drawPixel(7, -8, 6, 15, "#ffd368"); ctx.restore();
+      drawPixel(-23 - clothLag * .35, -58, 12, 8, "#ffe176"); drawPixel(-28 - clothLag * .7, -42, 17, 30, "#8ecdf1"); drawPixel(-25 - clothLag * .7, -39, 11, 23, "#dff5ff");
+      drawPixel(7, -48, 13, 9, "#3e75b2"); drawPixel(15, -43, 11, 7, skin); drawPixel(21, -41, 7, 4, light);
+      const swing = victory ? -82 : windup ? -72 : strike ? 24 : attackFrame >= 5 ? 8 : -4; ctx.save(); ctx.translate(13, -39); ctx.rotate(swing * Math.PI / 180); drawPixel(0, -4, 46, 7, "#dcefff"); drawPixel(3, -3, 39, 2, "#ffffff"); drawPixel(7, -8, 6, 15, "#ffd368"); ctx.restore();
     }
     if (!hero.down) {
       const hpW = 44, ratio = hero.hp / hero.stats.maxHp;
@@ -725,30 +779,45 @@
     if (enemy.action === "dead" && enemy.actionT <= 0) return;
     const x = Math.round(enemy.x), y = GROUND;
     ctx.save(); ctx.translate(x, y); ctx.globalAlpha = enemy.dead ? Math.max(0, enemy.actionT / .8) : 1;
-    const bob = enemy.def.id === "dandelion" ? Math.sin(time * 4 + x) * 7 : Math.abs(Math.sin(time * 3 + x)) * 2;
+    const shadowWidth = enemy.def.boss ? 105 : enemy.def.elite ? 70 : 46;
+    drawPixel(-shadowWidth / 2, -2, shadowWidth, 6, "rgba(40,60,60,.22)");
+    const animFrame = Math.floor((time * 7 + x * .01) % 4);
+    const bob = enemy.def.id === "dandelion" ? [-4, -8, -5, -1][animFrame] : [0, 1, 2, 1][animFrame];
     ctx.translate(0, -bob);
-    drawPixel(-23, -2, 46, 6, "rgba(40,60,60,.22)");
+    if (enemy.action === "hurt") ctx.translate(5, 0);
     if (enemy.def.id === "slime" || enemy.def.id === "elite") {
       const scale = enemy.def.elite ? 1.55 : 1;
-      ctx.scale(scale, scale);
+      const squash = enemy.action === "attack" ? 1.18 : enemy.action === "hurt" ? .84 : [1, 1.04, 1, .96][animFrame];
+      ctx.scale(scale / squash, scale * squash);
       drawPixel(-20, -28, 40, 26, "#397855"); drawPixel(-17, -31, 34, 29, "#83d879");
+      drawPixel(-13, -29, 17, 6, "#a9eca0"); drawPixel(-16, -9, 32, 7, "#61b565");
       drawPixel(-10, -22, 5, 6, "#294b4f"); drawPixel(8, -22, 5, 6, "#294b4f");
       drawPixel(-3, -39, 6, 10, "#55964e"); drawPixel(-10, -46, 20, 9, enemy.def.elite ? "#ffd05e" : "#ed8eac");
       if (enemy.def.elite) drawPixel(-14, -52, 7, 10, "#f8cc4d");
     } else if (enemy.def.id === "mushroom") {
       drawPixel(-13, -37, 26, 34, "#e9d5ac"); drawPixel(-26, -53, 52, 22, "#e88378"); drawPixel(-18, -60, 36, 15, "#f1a58e");
+      drawPixel(-18, -54, 24, 6, "#ffc3aa"); drawPixel(12, -49, 9, 12, "#bb5e66");
       drawPixel(-7, -29, 4, 5, "#3f4e54"); drawPixel(6, -29, 4, 5, "#3f4e54");
-      drawPixel(-30, -38, 14, 31, "#6d9d53");
+      const shieldLift = enemy.action === "hurt" || enemy.shield > 0 ? -10 : 0;
+      drawPixel(-32, -38 + shieldLift, 17, 32, "#456942"); drawPixel(-29, -35 + shieldLift, 12, 26, "#7baa5c"); drawPixel(-27, -32 + shieldLift, 7, 6, "#a8d27b");
     } else if (enemy.def.id === "dandelion") {
-      drawPixel(-13, -40, 26, 27, "#ffe28a"); drawPixel(-20, -57, 8, 18, "#fff5c1"); drawPixel(-6, -62, 8, 22, "#fff5c1"); drawPixel(9, -58, 8, 19, "#fff5c1");
+      drawPixel(-13, -40, 26, 27, "#e8b95f"); drawPixel(-10, -39, 20, 22, "#ffe28a");
+      drawPixel(-24, -56, 8, 18, "#fff5c1"); drawPixel(-11, -62, 8, 22, "#fff5c1"); drawPixel(4, -64, 8, 23, "#fff8d8"); drawPixel(17, -57, 8, 18, "#fff5c1");
+      drawPixel(-18, -50, 5, 5, "#ffffff"); drawPixel(14, -50, 5, 5, "#ffffff");
       drawPixel(-5, -31, 4, 4, "#405064"); drawPixel(6, -31, 4, 4, "#405064");
     } else if (enemy.def.boss) {
-      drawPixel(-47, -61, 77, 57, "#f5e6bd"); drawPixel(14, -79, 34, 46, "#fff2cf");
-      drawPixel(-34, -16, 11, 18, "#d1b680"); drawPixel(14, -16, 11, 18, "#d1b680");
-      drawPixel(34, -71, 5, 5, "#315473");
-      drawPixel(23, -99, 6, 28, "#8ee0e8"); drawPixel(42, -104, 6, 33, "#8ee0e8");
-      drawPixel(9, -100, 20, 5, "#8ee0e8"); drawPixel(42, -106, 20, 5, "#8ee0e8");
-      drawPixel(8, -89, 40, 12, "#6fba61"); drawPixel(16, -95, 8, 8, "#f2a5be"); drawPixel(32, -97, 8, 8, "#ffe678");
+      const charge = enemy.action === "windup" ? Math.sin(time * 22) * 3 : 0;
+      ctx.translate(charge, enemy.action === "attack" ? 3 : 0);
+      drawPixel(-51, -64, 82, 60, "#b99c70"); drawPixel(-47, -62, 74, 53, "#eadbb3"); drawPixel(-42, -59, 38, 13, "#fff1ce");
+      drawPixel(10, -83, 39, 52, "#c7aa78"); drawPixel(14, -81, 34, 47, "#f8e8bd"); drawPixel(17, -79, 14, 32, "#fff5d8");
+      drawPixel(-38, -22, 12, 24, "#a98b62"); drawPixel(-35, -20, 8, 18, "#ead8ad"); drawPixel(11, -21, 12, 23, "#a98b62"); drawPixel(14, -19, 8, 17, "#ead8ad");
+      drawPixel(-41, -4, 18, 6, "#54485a"); drawPixel(9, -4, 18, 6, "#54485a");
+      drawPixel(35, -72, 6, 6, "#294c66"); drawPixel(40, -64, 8, 4, "#866b51");
+      const horn = enemy.bossShielded ? "#ffe889" : "#83d6df";
+      drawPixel(21, -109, 6, 30, horn); drawPixel(45, -113, 6, 35, horn);
+      drawPixel(8, -110, 19, 6, horn); drawPixel(3, -119, 6, 14, horn); drawPixel(45, -116, 23, 6, horn); drawPixel(61, -126, 6, 15, horn);
+      drawPixel(12, -95, 39, 13, "#4f8950"); drawPixel(15, -94, 34, 8, "#75b968"); drawPixel(17, -101, 9, 9, "#ef91b0"); drawPixel(30, -103, 9, 9, "#ffe06d"); drawPixel(42, -99, 8, 8, "#bc8fe1");
+      drawPixel(-35, -52, 10, 8, "#dba0b0"); drawPixel(-19, -51, 10, 8, "#8ed6d3"); drawPixel(-2, -48, 9, 7, "#efd16f");
     }
     if (!enemy.dead) {
       const width = enemy.def.boss ? 110 : enemy.def.elite ? 70 : 46;
@@ -765,9 +834,11 @@
     game.projectiles.forEach(p => {
       if (p.delay > 0) return;
       if (p.type.includes("arrow")) {
+        if (p.type !== "arrow") { drawPixel(p.x - 27, p.y + 1, 14, 2, "rgba(255,242,145,.42)"); drawPixel(p.x - 42, p.y + 1, 9, 2, "rgba(255,242,145,.2)"); }
         drawPixel(p.x - 10, p.y, 19, 3, p.type === "star-arrow" ? "#ffef87" : "#e7f7d5");
         drawPixel(p.x + 8, p.y - 2, 5, 7, p.type === "skill-arrow" ? "#7ff0a0" : "#9b7444");
       } else {
+        drawPixel(p.x - 20, p.y - 2, 12, 4, p.type === "enemy-magic" ? "rgba(255,226,109,.35)" : "rgba(176,148,244,.35)");
         ctx.fillStyle = p.type === "enemy-magic" ? "#ffec96" : "#d6c2ff";
         ctx.fillRect(p.x - 6, p.y - 6, 12, 12); ctx.fillStyle = "white"; ctx.fillRect(p.x - 2, p.y - 2, 4, 4);
       }
@@ -799,11 +870,14 @@
 
   function draw(time) {
     ctx.clearRect(0, 0, canvas.width, canvas.height);
+    ctx.save();
+    if (game.screenShake > 0) ctx.translate(Math.round(Math.sin(time * 91) * game.screenShake), Math.round(Math.cos(time * 73) * game.screenShake * .45));
     drawBackground(time);
     game.heroes.forEach(h => drawHero(h, time));
     game.enemies.forEach(e => drawEnemy(e, time));
     drawProjectiles();
     drawEffects();
+    ctx.restore();
     if (game.paused) {
       ctx.fillStyle = "rgba(20,35,55,.32)"; ctx.fillRect(0, 0, canvas.width, canvas.height);
       ctx.fillStyle = "white"; ctx.font = "bold 28px Microsoft YaHei"; ctx.textAlign = "center"; ctx.fillText("冒险暂停", 480, 265);
@@ -854,7 +928,7 @@
       const ratio = Math.max(0, h.hp / h.stats.maxHp * 100);
       const skill = Math.max(0, Math.min(100, (1 - h.skillCd / h.stats.skillCd) * 100));
       return `<article class="hero-card ${h.down ? "down" : ""}">
-        <div class="portrait ${h.id}">${h.def.icon}</div>
+        ${portraitHtml(h.id)}
         <div class="hero-meta"><header><b>${h.def.name}</b><span>${h.def.title}</span></header><div class="bar hp-bar"><i style="width:${ratio}%"></i></div></div>
         <div class="skill-meter" style="--skill:${skill}%"><span>${h.down ? "倒下" : h.skillCd <= 0 ? "READY" : Math.ceil(h.skillCd)}</span></div>
       </article>`;
@@ -863,10 +937,11 @@
     $("#bossBar").hidden = !boss;
     if (boss) {
       const ratio = boss.hp / boss.maxHp;
-      const phase = ratio > .6 ? "第一阶段 · 花藤试探" : ratio > .3 ? "第二阶段 · 自然祝福与召唤" : "第三阶段 · 花冠守护";
+      const phase = boss.action === "windup" ? "⚠ 花藤打击蓄力中" : ratio > .6 ? "第一阶段 · 花藤试探" : ratio > .3 ? "第二阶段 · 自然祝福与召唤" : "第三阶段 · 花冠守护";
       $("#bossName").textContent = boss.def.name; $("#bossHpFill").style.width = `${ratio * 100}%`;
       $("#bossHpText").textContent = `${Math.ceil(boss.hp)} / ${boss.maxHp}${boss.shield > 0 ? ` · 护盾 ${Math.ceil(boss.shield)}` : ""}`;
       $("#bossPhase").textContent = phase;
+      $("#bossBar").classList.toggle("charging", boss.action === "windup");
     }
     renderTopUI();
   }
@@ -891,7 +966,8 @@
     $$(".nav-button").forEach(b => b.classList.toggle("active", b.dataset.view === "battle"));
   }
 
-  function itemIcon(item) { return L.SLOT_ICONS[item.slot] || "◆"; }
+  function portraitHtml(id) { return `<div class="portrait ${id}" aria-hidden="true"><span class="p-hair"></span><span class="p-face"><i></i></span><span class="p-accent"></span></div>`; }
+  function itemIcon(item) { return `<span class="gear-sprite ${item.slot} ${item.charId || "shared"}"><i></i></span>`; }
   function itemStatsHtml(item) {
     const stats = [];
     if (item.stats.atk) stats.push(`<li>攻击力 +${item.stats.atk}</li>`);
@@ -904,7 +980,7 @@
   function renderInventory() {
     const item = state.inventory.find(x => x.id === selectedItemId) || state.inventory[0] || null;
     selectedItemId = item ? item.id : null;
-    const slots = state.inventory.map(it => { const q = L.qualityById(it.quality); return `<button class="item-slot ${it.id === selectedItemId ? "selected" : ""}" data-item="${it.id}" style="--rarity:${q.color}" title="${it.name}"><span class="item-icon">${itemIcon(it)}</span>${it.locked ? "<b>◆</b>" : ""}<small>Lv.${it.level}</small></button>`; }).join("");
+    const slots = state.inventory.map(it => { const q = L.qualityById(it.quality); return `<button class="item-slot quality-${it.quality} ${it.id === selectedItemId ? "selected" : ""}" data-item="${it.id}" style="--rarity:${q.color}" title="${it.name}">${itemIcon(it)}${it.locked ? "<b>◆</b>" : ""}<small>Lv.${it.level}</small></button>`; }).join("");
     let detail = `<div class="empty-state">击败怪物后，装备会自动进入背包。<br>已穿戴装备不占背包容量。</div>`;
     if (item) {
       const q = L.qualityById(item.quality);
@@ -917,7 +993,7 @@
   }
 
   function renderFormation() {
-    const units = state.formation.map((id, index) => { const c = L.CHARACTERS[id]; return `<div class="formation-unit"><div class="portrait ${id}">${c.icon}</div><b>${c.name}</b><small>${c.title}</small><div class="reorder"><button data-move="${index}:left" ${index === 0 ? "disabled" : ""}>←</button><button data-move="${index}:right" ${index === 3 ? "disabled" : ""}>→</button></div></div>${index < 3 ? '<span class="formation-arrow">›</span>' : ""}`; }).join("");
+    const units = state.formation.map((id, index) => { const c = L.CHARACTERS[id]; return `<div class="formation-unit">${portraitHtml(id)}<b>${c.name}</b><small>${c.title}</small><div class="reorder"><button data-move="${index}:left" ${index === 0 ? "disabled" : ""}>←</button><button data-move="${index}:right" ${index === 3 ? "disabled" : ""}>→</button></div></div>${index < 3 ? '<span class="formation-arrow">›</span>' : ""}`; }).join("");
     const tactics = Object.entries(L.TACTICS).map(([id, t]) => `<button class="tactic-card ${state.tactic === id ? "active" : ""}" data-tactic="${id}"><b>${t.name}</b><small>${t.desc}</small></button>`).join("");
     const presets = [["farm", "刷图套"], ["boss", "BOSS套"]].map(([id, name]) => `<div class="preset-card"><div><b>${name}</b><small>${state.presets[id] ? `已保存 · ${new Date(state.presets[id].savedAt).toLocaleDateString("zh-CN")}` : "尚未保存"}</small></div><button class="secondary-button" data-save-preset="${id}">保存当前</button><button class="primary-button" data-apply-preset="${id}" ${state.presets[id] ? "" : "disabled"}>一键换装</button></div>`).join("");
     $("#drawerBody").innerHTML = `<section class="panel-card"><div class="section-heading"><div><h3>横向站位</h3><small>左侧为后方，右侧最先接敌；下次关卡开始生效。</small></div></div><div class="formation-line">${units}<div class="enemy-marker">敌人<br>←</div></div></section><section class="panel-card"><div class="section-heading"><h3>自动战术</h3></div><div class="tactic-grid">${tactics}</div></section><section class="panel-card"><div class="section-heading"><div><h3>队伍预设</h3><small>站位、战术与全员装备一起保存。</small></div></div><div class="preset-grid">${presets}</div></section>`;
