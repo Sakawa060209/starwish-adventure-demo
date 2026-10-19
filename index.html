@@ -14,7 +14,7 @@
     <header class="topbar">
       <div class="brand" aria-label="星愿物语 少女冒险团">
         <span class="brand-star">✦</span>
-        <div><strong>星愿物语</strong><small>少女冒险团 · DEMO 0.1</small></div>
+        <div><strong>星愿物语</strong><small>少女冒险团 · DEMO 0.2</small></div>
       </div>
       <div class="resource-strip">
         <span class="resource stage-pill">晴风花原 <b id="stageLabel">1-1</b></span>
@@ -40,8 +40,8 @@
         <button class="pause-button" id="pauseButton" aria-label="暂停战斗">Ⅱ</button>
       </div>
       <div class="boss-bar" id="bossBar" hidden>
-        <div class="boss-name"><span>✦</span><b id="bossName">花冠鹿灵</b><span>✦</span></div>
-        <div class="bar boss-hp"><i id="bossHpFill"></i></div>
+        <div class="boss-heading"><span class="boss-portrait">♞</span><div><div class="boss-name"><span>✦</span><b id="bossName">花冠鹿灵</b><span>✦</span></div><small id="bossPhase">第一阶段 · 花藤试探</small></div></div>
+        <div class="bar boss-hp"><i id="bossHpFill"></i><span class="phase-mark p60"></span><span class="phase-mark p30"></span></div>
         <small id="bossHpText">1650 / 1650</small>
       </div>
       <div class="wave-track" aria-label="本关波次进度">
@@ -49,6 +49,7 @@
         <div id="waveDots" class="wave-dots"></div>
       </div>
       <div class="battle-feed" id="battleFeed" aria-live="polite"></div>
+      <button class="report-chip" id="reportButton" hidden>战报</button>
       <div class="loot-float" id="lootFloat"></div>
       <div class="start-overlay" id="startOverlay">
         <div class="start-card">

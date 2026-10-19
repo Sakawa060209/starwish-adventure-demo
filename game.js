@@ -37,8 +37,29 @@
     effects: [],
     feed: [],
     pendingDrops: 0,
-    startedAt: 0
+    startedAt: 0,
+    synergyCd: 0,
+    guardComboCd: 0,
+    guardWindow: 0,
+    report: null
   };
+
+  function freshReport() {
+    const zeros = Object.fromEntries(Object.keys(L.CHARACTERS).map(id => [id, 0]));
+    return { stage: game.stageId, damageByHero: { ...zeros }, takenByHero: { ...zeros }, skillsByHero: { ...zeros }, synergyBursts: 0, guardCombos: 0, breakSeconds: 0, starSeconds: 0, bossHeal: 0, frontDownAt: null, loot: [] };
+  }
+
+  function buildReport(success, reason) {
+    const report = game.report || freshReport();
+    report.success = success;
+    report.reason = reason || "";
+    report.seconds = Math.round(game.stageTime * 10) / 10;
+    report.totalDamage = Math.round(Object.values(report.damageByHero).reduce((a, b) => a + b, 0));
+    report.totalTaken = Math.round(Object.values(report.takenByHero).reduce((a, b) => a + b, 0));
+    report.breakUptime = Math.min(100, Math.round(report.breakSeconds / Math.max(1, game.stageTime) * 100));
+    report.starUptime = Math.min(100, Math.round(report.starSeconds / Math.max(1, game.stageTime) * 100));
+    return report;
+  }
 
   function beep(type) {
     if (!state.settings.sound) return;
@@ -124,6 +145,10 @@
     game.projectiles = [];
     game.effects = [];
     game.pendingDrops = 0;
+    game.synergyCd = 0;
+    game.guardComboCd = 0;
+    game.guardWindow = 0;
+    game.report = freshReport();
     game.running = true;
     game.paused = false;
     game.startedAt = performance.now();
@@ -148,6 +173,7 @@
         shield: 0, breakT: 0, starT: 0,
         action: "enter", actionT: .4,
         dead: false, rewarded: false,
+        recentHitters: {},
         eliteShielded: false, bossHealed: false, bossShielded: false,
         summoned: false
       };
@@ -180,6 +206,7 @@
   function applyEnemyDamage(hero, enemy, multiplier, opts) {
     if (!enemy || enemy.dead) return 0;
     opts = opts || {};
+    enemy.recentHitters = enemy.recentHitters || {};
     let bonus = opts.bonus || 0;
     if (enemy.breakT > 0) bonus += (hero.stats.armorBreakDmg || 0) + (hero.id === "lancer" ? .1 : 0);
     if (enemy.starT > 0) bonus += .08 + (hero.stats.starDmg || 0);
@@ -195,8 +222,18 @@
     if (amount > 0) {
       enemy.hp = Math.max(0, enemy.hp - amount);
       hero.damageDone += amount;
+      if (game.report) game.report.damageByHero[hero.id] += amount;
+      enemy.recentHitters[hero.id] = game.stageTime;
       addEffect("text", enemy.x, GROUND - 72, `${crit ? "✦ " : ""}${amount}`, crit ? "#ffe06a" : "#fff", .72);
       addEffect("spark", enemy.x - 6, GROUND - 56, "", opts.magic ? "#b69cff" : "#ecf7ff", .35);
+    }
+    const recentTeam = Object.values(enemy.recentHitters || {}).filter(at => game.stageTime - at <= 5).length;
+    if (!opts.noCombo && enemy.hp > 0 && enemy.breakT > 0 && enemy.starT > 0 && recentTeam >= 2 && game.synergyCd <= 0) {
+      game.synergyCd = 12;
+      game.report.synergyBursts++;
+      addFeed("协同爆发 · 破甲与星痕共鸣！", "gold");
+      addEffect("synergy", enemy.x, GROUND - 58, "协同爆发", "#fff09a", 1.1);
+      game.heroes.filter(h => !h.down).forEach(h => applyEnemyDamage(h, enemy, .28, { noCrit: true, magic: true, noCombo: true }));
     }
     if (enemy.hp <= 0) killEnemy(enemy, hero);
     return amount;
@@ -226,6 +263,15 @@
       shoot(hero, target, 1, "magic");
     } else {
       applyEnemyDamage(hero, target, hero.empowered ? 1.15 : 1);
+      if (hero.id === "lancer" && game.guardWindow > 0 && game.guardComboCd <= 0 && !target.dead) {
+        game.guardComboCd = 10;
+        game.guardWindow = 0;
+        game.report.guardCombos++;
+        game.heroes.forEach(h => { h.inspiredT = Math.max(h.inspiredT || 0, 3); });
+        applyEnemyDamage(hero, target, .75, { noCrit: true, noCombo: true });
+        addEffect("guardlink", (hero.x + target.x) / 2, GROUND - 52, "守望突击", "#9eeeff", .9);
+        addFeed("守望突击 · 守护后接枪击，全队提速", "skill");
+      }
       if (hero.id === "knight" && hero.empowered && hero.stats.legendaryId === "star-sword") {
         game.enemies.filter(e => !e.dead && Math.abs(e.x - target.x) < 95).slice(0, 2).forEach(e => applyEnemyDamage(hero, e, .8, { noCrit: true }));
         addEffect("slash", target.x, GROUND - 52, "", "#8ed8ff", .55);
@@ -243,6 +289,7 @@
     const level = state.skills[hero.id] || 1;
     hero.action = "skill"; hero.actionT = .72;
     hero.skillCd = hero.stats.skillCd;
+    if (game.report) game.report.skillsByHero[hero.id]++;
     const multiplier = hero.def.skillBase + .15 * (level - 1);
     if (hero.id === "knight") {
       game.enemies.filter(e => !e.dead && e.x - hero.x <= 105).slice(0, 2).forEach(e => applyEnemyDamage(hero, e, multiplier));
@@ -277,10 +324,12 @@
       amount = Math.max(1, Math.floor(amount * .75));
       hero.guardCd = 8;
       hero.empowered = true;
+      game.guardWindow = 4;
       addEffect("text", hero.x, GROUND - 106, "守护", "#8cd8ff", .8);
     }
     hero.hp = Math.max(0, hero.hp - amount);
     hero.damageTaken += amount;
+    if (game.report) game.report.takenByHero[hero.id] += amount;
     hero.action = "hurt"; hero.actionT = .25;
     addEffect("text", hero.x, GROUND - 75, `-${amount}`, "#ffb2b8", .65);
     if (hero.stats.counter && hero.counterCd <= 0 && L.rngNext(state) < .15 && attacker && !attacker.dead) {
@@ -290,6 +339,7 @@
     }
     if (hero.hp <= 0) {
       hero.down = true; hero.action = "down"; hero.actionT = 999;
+      if (hero.id === "knight" && game.report && game.report.frontDownAt === null) game.report.frontDownAt = Math.round(game.stageTime * 10) / 10;
       addFeed(`${hero.def.name}倒下了`, "danger");
     }
     beep("hurt");
@@ -306,12 +356,14 @@
     const guaranteed = enemy.def.elite || enemy.def.boss;
     if (guaranteed || L.rngNext(state) < .18) {
       let options = guaranteed ? { minQuality: "rare" } : {};
+      if (state.idlePlan === "gear" && state.lootFocus !== "all" && L.rngNext(state) < .7) options.slot = state.lootFocus;
       if (game.stageId === 1 && !state.firstClears[1] && game.pendingDrops === 0) options = { minQuality: "magic", slot: "armor" };
       const item = L.generateItem(state, game.stageId, options);
       const result = L.addItem(state, item);
       game.pendingDrops++;
       const quality = L.qualityById(item.quality);
       if (result.kept) {
+        if (game.report) game.report.loot.push({ name: item.name, quality: item.quality });
         showLoot(`${quality.name} · ${item.name}`, quality.color);
         toast(`获得${quality.name}装备：${item.name}`, item.quality === "legendary" ? "gold" : "");
         beep("drop");
@@ -361,7 +413,9 @@
     }
     if (enemy.def.boss) {
       if (!enemy.bossHealed && enemy.hp / enemy.maxHp < .6) {
+        const beforeHeal = enemy.hp;
         enemy.hp = Math.min(enemy.maxHp, enemy.hp + enemy.maxHp * .08); enemy.bossHealed = true;
+        if (game.report) game.report.bossHeal += Math.round(enemy.hp - beforeHeal);
         const summons = [0, 1].map((_, i) => {
           const d = L.ENEMIES.S; const hp = Math.round(d.hp * L.hpMultiplier(game.stageId));
           return { uid: `summon-${i}-${Date.now()}`, code: "S", def: d, x: enemy.x + 65 + i * 48, hp, maxHp: hp, atk: Math.round(d.atk * L.atkMultiplier(game.stageId)), defense: d.def, atkCd: 1, specialCd: 99, shield: 0, breakT: 0, starT: 0, action: "enter", actionT: .4, dead: false, rewarded: false };
@@ -456,14 +510,28 @@
       showLoot(`${quality.name} · ${guaranteedItem.name}`, quality.color);
       toast(`首通保底：${guaranteedItem.name}`, "gold");
     }
+    if (first && (game.stageId === 3 || game.stageId === 7)) {
+      const milestone = L.generateItem(state, game.stageId, game.stageId === 3
+        ? { minQuality: "rare", slot: "weapon" }
+        : { minQuality: "epic", slot: "accessory", forceAffixes: ["synergy", "starlight"] });
+      const kept = L.addItem(state, milestone);
+      if (kept.kept) {
+        game.report.loot.push({ name: milestone.name, quality: milestone.quality });
+        game.pendingDrops++;
+        showLoot(`里程碑保底 · ${milestone.name}`, L.qualityById(milestone.quality).color);
+        toast(`第${game.stageId}关保底：${milestone.name}`, "gold");
+      }
+    }
     state.firstClears[game.stageId] = true;
     const bonus = game.stageId * 20;
     state.gold += bonus;
-    L.recordRun(state, game.stageId, true, game.stageTime);
+    const report = buildReport(true);
+    L.recordRun(state, game.stageId, true, game.stageTime, report);
     state.failures = 0;
     if (game.stageId < 10) state.unlockedStage = Math.max(state.unlockedStage, game.stageId + 1);
     if (game.stageId === 10 && !first) {
       state.shards += 1;
+      state.bossRecords.drops = [...(state.bossRecords.drops || []), `花冠碎片 ×1`].slice(-20);
       if (L.rngNext(state) < .01) {
         const legend = L.generateItem(state, 10, { legendaryId: Object.values(L.LEGENDARIES)[Math.floor(L.rngNext(state) * 4)].id });
         L.addItem(state, legend);
@@ -476,25 +544,33 @@
     beep("win");
     L.save(state);
     renderTopUI();
+    $("#reportButton").hidden = false;
     if (game.stageId === 10 && first) {
       setTimeout(showLegendChoice, 900);
       return;
     }
-    const next = state.mode === "progress" && game.stageId < 10 ? game.stageId + 1 : game.stageId;
+    const next = state.idlePlan === "progress" && game.stageId < 10 ? game.stageId + 1 : state.idlePlan === "boss" && state.unlockedStage >= 10 ? 10 : L.clamp(state.planStage || game.stageId, 1, state.unlockedStage);
     transitionTimer = setTimeout(() => startStage(next), 2600 / game.speed);
   }
 
   function failStage(reason) {
     if (!game.running) return;
     game.running = false; game.phase = "defeat";
-    L.recordRun(state, game.stageId, false, game.stageTime);
+    const provisional = buildReport(false, reason);
+    let diagnosis = reason;
+    if (provisional.frontDownAt !== null && provisional.frontDownAt < game.stageTime * .55) diagnosis = `前排在 ${provisional.frontDownAt}s 过早倒下；优先提升骑士生命、防御或切换守势。`;
+    else if (game.stageId === 10 && provisional.breakUptime < 25) diagnosis = `BOSS破甲覆盖仅 ${provisional.breakUptime}%；强化枪兵冷却并保留协同词条。`;
+    else if (provisional.bossHeal > 0) diagnosis = `BOSS本次回复 ${provisional.bossHeal} 生命；第二阶段输出不足，建议使用BOSS预设。`;
+    provisional.reason = diagnosis;
+    L.recordRun(state, game.stageId, false, game.stageTime, provisional);
     state.failures++;
-    addFeed(`挑战失败：${reason}`, "danger");
-    toast(reason, "error");
+    addFeed(`挑战失败：${diagnosis}`, "danger");
+    toast(diagnosis, "error");
+    $("#reportButton").hidden = false;
     let retryStage = game.stageId;
     if (state.mode === "progress" && state.failures >= 3) {
       retryStage = Math.min(state.lastStableStage || Math.max(1, game.stageId - 1), state.unlockedStage);
-      state.mode = "repeat";
+      state.mode = "repeat"; state.idlePlan = "gear"; state.planStage = retryStage;
       state.failures = 0;
       toast(`连续失败，已回到第${retryStage}关稳定挂机。`);
     }
@@ -506,18 +582,25 @@
   function update(dt) {
     if (!game.running || game.paused) return;
     game.stageTime += dt;
+    game.synergyCd -= dt; game.guardComboCd -= dt; game.guardWindow -= dt;
     updateEffects(dt);
     if (game.phase === "march") {
       game.world += 56 * dt;
       game.marchDistance += 56 * dt;
       game.heroes.forEach(h => updateHero(h, dt));
-      if (game.marchDistance >= 250 + game.waveIndex * 22) spawnWave();
+      const patrol = state.settings.quickPatrol && state.idlePlan !== "progress" ? 118 : 250;
+      if (game.marchDistance >= patrol + game.waveIndex * 22) spawnWave();
       return;
     }
     if (game.phase !== "combat") return;
     game.waveTime += dt;
     game.heroes.forEach(h => updateHero(h, dt));
     game.enemies.forEach(e => updateEnemy(e, dt));
+    if (game.report) {
+      const boss = game.enemies.find(e => e.def.boss && !e.dead);
+      if (boss?.breakT > 0) game.report.breakSeconds += dt;
+      if (boss?.starT > 0) game.report.starSeconds += dt;
+    }
     updateProjectiles(dt);
     if (game.heroes.every(h => h.down)) return failStage("冒险团全员倒下，建议强化前线生存能力。 ");
     const limit = game.enemies.some(e => e.def.boss && !e.dead) ? 75 : 90;
@@ -532,6 +615,9 @@
     const grad = ctx.createLinearGradient(0, 0, 0, h);
     grad.addColorStop(0, "#7fd3ee"); grad.addColorStop(.57, "#dff6dc"); grad.addColorStop(1, "#9acd70");
     ctx.fillStyle = grad; ctx.fillRect(0, 0, w, h);
+    const sun = ctx.createRadialGradient(128, 76, 8, 128, 76, 105);
+    sun.addColorStop(0, "rgba(255,250,190,.95)"); sun.addColorStop(.3, "rgba(255,239,155,.34)"); sun.addColorStop(1, "rgba(255,255,255,0)");
+    ctx.fillStyle = sun; ctx.fillRect(0, 0, 260, 210);
     const cloudOffset = -(game.world * .08) % 260;
     for (let i = -1; i < 6; i++) {
       const x = cloudOffset + i * 240 + (i % 2) * 45;
@@ -544,6 +630,9 @@
     for (let i = -2; i < 6; i++) {
       ctx.beginPath(); ctx.moveTo(far + i * 240, 320); ctx.lineTo(far + i * 240 + 130, 160 + (i % 2) * 20); ctx.lineTo(far + i * 240 + 280, 320); ctx.fill();
     }
+    const ruin = 610 - (game.world * .12 % 1250);
+    drawPixel(ruin, 230, 18, 104, "#9eb7a2"); drawPixel(ruin + 70, 246, 17, 88, "#91ad98");
+    drawPixel(ruin - 8, 220, 105, 13, "#bfd0b1"); drawPixel(ruin + 24, 246, 37, 88, "rgba(210,230,195,.62)");
     const hills = -(game.world * .28) % 190;
     ctx.fillStyle = "#70bd80";
     for (let i = -2; i < 8; i++) {
@@ -556,6 +645,9 @@
       drawPixel(x - 26, 226, 68, 54, i % 3 ? "#5fa967" : "#73b86b");
       drawPixel(x - 12, 208, 42, 36, "#82c67b");
     }
+    const mill = 850 - (game.world * .35 % 1350);
+    drawPixel(mill, 254, 44, 80, "#eadbb6"); drawPixel(mill - 8, 244, 60, 13, "#a77d62"); drawPixel(mill + 18, 276, 10, 58, "#8b654c");
+    ctx.save(); ctx.translate(mill + 22, 250); ctx.rotate(time * .18); for (let i = 0; i < 4; i++) { ctx.rotate(Math.PI / 2); drawPixel(0, -3, 52, 7, "#f1e7cd"); drawPixel(34, -7, 18, 14, "rgba(247,239,215,.8)"); } ctx.restore();
     drawPixel(0, 334, w, 60, "#72bf63");
     drawPixel(0, 354, w, 40, "#8dd16f");
     drawPixel(0, GROUND, w, h - GROUND, "#c39a61");
@@ -567,6 +659,11 @@
       drawPixel(x + 5, GROUND - 7, 8, 3, "#479e56");
       drawPixel(x + 34, GROUND + 32, 22, 4, "rgba(126,83,49,.2)");
     }
+    for (let i = 0; i < 9; i++) {
+      const px = (i * 137 - game.world * (.55 + i * .02)) % 1100;
+      const py = 150 + (i % 4) * 45 + Math.sin(time * 1.5 + i) * 12;
+      drawPixel(px < -10 ? px + 1100 : px, py, 5, 4, i % 2 ? "rgba(255,238,143,.8)" : "rgba(255,178,199,.75)");
+    }
     if (game.stageId >= 8) {
       drawPixel(760 - (game.world * .25 % 900), 210, 66, 124, "#e5dfc1");
       drawPixel(748 - (game.world * .25 % 900), 190, 90, 24, "#b7a88c");
@@ -574,40 +671,48 @@
   }
 
   function drawHero(hero, time) {
-    const d = hero.def;
-    const bob = hero.action === "run" ? Math.round(Math.sin(time * 12 + hero.homeX) * 3) : Math.round(Math.sin(time * 3 + hero.homeX) * 1.5);
-    const x = Math.round(hero.x), y = GROUND + bob;
-    ctx.save(); ctx.translate(x, y);
-    if (hero.down) ctx.rotate(Math.PI / 2.7);
+    const bob = hero.action === "run" ? Math.round(Math.sin(time * 13 + hero.homeX) * 3) : Math.round(Math.sin(time * 3.2 + hero.homeX) * 1.5);
+    const strike = hero.action === "attack" || hero.action === "skill";
+    const leg = hero.action === "run" ? Math.round(Math.sin(time * 13 + hero.homeX) * 5) : 0;
+    const recoil = hero.action === "hurt" ? -4 : 0;
+    ctx.save(); ctx.translate(Math.round(hero.x) + recoil, GROUND + bob); ctx.scale(1.06, 1.06);
+    if (hero.down) { ctx.rotate(Math.PI / 2.55); ctx.translate(0, 13); }
     ctx.globalAlpha = hero.down ? .55 : 1;
-    drawPixel(-22, -3, 45, 7, "rgba(52,70,75,.22)");
-    const hair = { mage: "#b9a0ed", archer: "#7ed6a0", lancer: "#f08eac", knight: "#dcebf7" }[hero.id];
-    const cloth = { mage: "#7665ca", archer: "#43a966", lancer: "#e46b87", knight: "#4f91d4" }[hero.id];
-    const skin = "#ffd6bd", outline = "#35445e";
-    const attackLean = (hero.action === "attack" || hero.action === "skill") ? 5 : 0;
-    const leg = hero.action === "run" ? Math.round(Math.sin(time * 12 + hero.homeX) * 5) : 0;
-    drawPixel(-10 - leg, -19, 8, 19, outline); drawPixel(4 + leg, -19, 8, 19, outline);
-    drawPixel(-9 - leg, -18, 6, 15, "#f1f3f8"); drawPixel(5 + leg, -18, 6, 15, "#f1f3f8");
-    drawPixel(-15 + attackLean, -48, 31, 30, outline); drawPixel(-12 + attackLean, -46, 25, 27, cloth);
-    drawPixel(-14 + attackLean, -64, 29, 22, skin);
-    drawPixel(-17 + attackLean, -72, 34, 18, hair);
-    drawPixel(-18 + attackLean, -64, 8, 22, hair); drawPixel(11 + attackLean, -62, 8, hero.id === "lancer" ? 34 : 25, hair);
-    drawPixel(8 + attackLean, -60, 4, 4, "#324a68");
-    drawPixel(-9 + attackLean, -43, 6, 16, "#ffffff");
-    if (hero.id === "knight") {
-      const swing = hero.action === "attack" || hero.action === "skill" ? -28 : -2;
-      ctx.save(); ctx.translate(17, -39); ctx.rotate(swing * Math.PI / 180); drawPixel(0, -4, 42, 6, "#dcefff"); drawPixel(7, -7, 5, 12, "#ffd46a"); ctx.restore();
-      drawPixel(-19, -48, 8, 31, "#d6eeff");
-    } else if (hero.id === "lancer") {
-      const thrust = hero.action === "attack" || hero.action === "skill" ? 16 : 0;
-      drawPixel(8 + thrust, -43, 65, 4, "#f0e2c6"); drawPixel(70 + thrust, -46, 12, 10, "#ec859d");
-      drawPixel(-4, -80, 8, 16, "#f5b0c5");
+    drawPixel(-24, -3, 50, 7, "rgba(42,59,65,.24)");
+    const outline = "#2e3b55", skin = "#ffd4ba", light = "#fff1df";
+    const legs = (boot, sock) => { drawPixel(-11 - leg, -21, 9, 21, outline); drawPixel(4 + leg, -21, 9, 21, outline); drawPixel(-9 - leg, -19, 6, 13, sock); drawPixel(6 + leg, -19, 6, 13, sock); drawPixel(-11 - leg, -6, 10, 6, boot); drawPixel(4 + leg, -6, 11, 6, boot); };
+    if (hero.id === "mage") {
+      legs("#51428d", "#ece7ff");
+      drawPixel(-17, -50, 34, 30, outline); drawPixel(-14, -48, 28, 26, "#7563c7"); drawPixel(-12, -46, 7, 21, "#a995ec");
+      drawPixel(-16, -66, 31, 22, skin); drawPixel(-18, -73, 35, 16, "#a995e5"); drawPixel(-19, -65, 9, 24, "#8a72d1"); drawPixel(10, -64, 8, 26, "#765fb9");
+      drawPixel(-13, -63, 8, 5, light); drawPixel(8, -60, 4, 4, "#3c4770");
+      drawPixel(-17, -82, 38, 9, outline); drawPixel(-12, -91, 28, 12, outline); drawPixel(-9, -89, 23, 9, "#6c5bbb"); drawPixel(13, -96, 8, 16, "#9c83e0");
+      const float = strike ? 8 : 0; drawPixel(19 + float, -49, 25, 20, outline); drawPixel(22 + float, -46, 8, 14, "#e8ddff"); drawPixel(33 + float, -46, 8, 14, "#b7d7ff");
+      if (hero.action === "skill") for (let i = 0; i < 4; i++) drawPixel(19 + i * 10, -83 - (i % 2) * 8, 6, 6, i % 2 ? "#9ee8ff" : "#f4ddff");
     } else if (hero.id === "archer") {
-      ctx.strokeStyle = "#8b6139"; ctx.lineWidth = 5; ctx.beginPath(); ctx.arc(28, -42, 20, -1.2, 1.2); ctx.stroke();
-      ctx.strokeStyle = "#eaf9e9"; ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(36, -60); ctx.lineTo(hero.action === "attack" ? 16 : 27, -42); ctx.lineTo(36, -23); ctx.stroke();
+      legs("#4d6d4e", "#dff6d9");
+      drawPixel(-20, -51, 34, 31, outline); drawPixel(-17, -48, 28, 27, "#3f9f63"); drawPixel(-17, -48, 8, 26, "#71ca89"); drawPixel(-22, -43, 9, 24, "#2f704a");
+      drawPixel(-17, -67, 31, 23, skin); drawPixel(-20, -73, 35, 17, "#66bf81"); drawPixel(-21, -66, 9, 24, "#4da66c");
+      drawPixel(-15, -64, 8, 5, light); drawPixel(7, -61, 4, 4, "#385268");
+      drawPixel(-17, -80, 27, 9, "#397f52"); drawPixel(-9, -85, 24, 9, "#75cc8e");
+      drawPixel(-25, -67, 9, 8, "#85dc99"); drawPixel(-32, -63, 14, 7, "#5eaf74");
+      ctx.strokeStyle = "#82572f"; ctx.lineWidth = 5; ctx.beginPath(); ctx.arc(28 + (strike ? 7 : 0), -43, 22, -1.25, 1.25); ctx.stroke();
+      ctx.strokeStyle = "#f4fff0"; ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(35 + (strike ? 7 : 0), -63); ctx.lineTo(strike ? 12 : 27, -43); ctx.lineTo(35 + (strike ? 7 : 0), -22); ctx.stroke();
+    } else if (hero.id === "lancer") {
+      legs("#743d58", "#ffe5ed");
+      drawPixel(-18, -51, 35, 31, outline); drawPixel(-15, -48, 29, 27, "#df6686"); drawPixel(-14, -46, 8, 22, "#f69db4"); drawPixel(-24, -33, 12, 8, "#f4b0c2");
+      drawPixel(-16, -67, 31, 23, skin); drawPixel(-19, -76, 35, 20, "#ed87a5"); drawPixel(-21, -66, 9, 27, "#d65f82");
+      drawPixel(-12, -64, 8, 5, light); drawPixel(8, -61, 4, 4, "#4b4763");
+      drawPixel(-12, -84, 8, 10, "#ffd0dc"); drawPixel(-6, -88, 8, 14, "#df6f91");
+      drawPixel(-25, -69, 10, 11, "#f4a4ba"); drawPixel(-35, -64, 17, 9, "#d85e82"); drawPixel(-42, -58, 14, 8, "#b84870");
+      const thrust = strike ? 18 : 0; drawPixel(6 + thrust, -45, 73, 5, "#f7e8cd"); drawPixel(5 + thrust, -44, 70, 2, "#fff9e9"); drawPixel(76 + thrust, -50, 16, 15, "#dc5e82"); drawPixel(88 + thrust, -46, 9, 7, "#ffb4c4");
     } else {
-      drawPixel(19, -43, 22, 17, "#384c86"); drawPixel(22, -40, 7, 11, "#e7dcff"); drawPixel(31, -40, 7, 11, "#b8d9ff");
-      if (hero.action === "skill") { drawPixel(22, -84, 7, 7, "#f4e3ff"); drawPixel(37, -72, 5, 5, "#d5c0ff"); }
+      legs("#435f85", "#edf7ff");
+      drawPixel(-22, -50, 37, 30, outline); drawPixel(-19, -47, 31, 27, "#4f8fd0"); drawPixel(-17, -45, 9, 22, "#8dc7ef"); drawPixel(-25, -48, 9, 28, "#e8f5ff");
+      drawPixel(-17, -67, 31, 23, skin); drawPixel(-19, -75, 34, 18, "#d7e9f4"); drawPixel(-20, -66, 8, 22, "#b9d4e7"); drawPixel(10, -64, 7, 21, "#a8c7df");
+      drawPixel(-14, -64, 8, 5, light); drawPixel(7, -61, 4, 4, "#354c68");
+      drawPixel(-23, -58, 12, 8, "#ffe176"); drawPixel(-28, -42, 17, 30, "#8ecdf1"); drawPixel(-25, -39, 11, 23, "#dff5ff");
+      const swing = strike ? -34 : -4; ctx.save(); ctx.translate(13, -39); ctx.rotate(swing * Math.PI / 180); drawPixel(0, -4, 46, 7, "#dcefff"); drawPixel(3, -3, 39, 2, "#ffffff"); drawPixel(7, -8, 6, 15, "#ffd368"); ctx.restore();
     }
     if (!hero.down) {
       const hpW = 44, ratio = hero.hp / hero.stats.maxHp;
@@ -682,6 +787,12 @@
       if (e.type === "thrust") { ctx.fillStyle = e.color; ctx.fillRect(-20, -3, 80 * (1 - p * .4), 6); }
       if (e.type === "starstorm") { ctx.fillStyle = e.color; for (let i = 0; i < 12; i++) { const a = i * 2.4; const r = 20 + i * 7 * p; ctx.fillRect(Math.cos(a) * r - 3, -45 + Math.sin(a) * 26 + p * 30, 7, 7); } }
       if (e.type === "vine") { ctx.strokeStyle = e.color; ctx.lineWidth = 7; ctx.beginPath(); ctx.moveTo(-32, 20); ctx.quadraticCurveTo(0, -80 * (1 - p), 30, 12); ctx.stroke(); }
+      if (e.type === "synergy") {
+        ctx.strokeStyle = e.color; ctx.lineWidth = 7 - p * 4;
+        for (let i = 0; i < 3; i++) { ctx.beginPath(); ctx.arc(0, 0, 24 + p * 58 + i * 11, 0, Math.PI * 2); ctx.stroke(); }
+        ctx.fillStyle = "#ffffff"; for (let i = 0; i < 8; i++) { const a = i * Math.PI / 4; ctx.fillRect(Math.cos(a) * (18 + p * 72) - 3, Math.sin(a) * (18 + p * 72) - 3, 7, 7); }
+      }
+      if (e.type === "guardlink") { ctx.strokeStyle = e.color; ctx.lineWidth = 5; ctx.setLineDash([12, 7]); ctx.beginPath(); ctx.moveTo(-80, 0); ctx.lineTo(80, 0); ctx.stroke(); ctx.setLineDash([]); }
       ctx.restore();
     });
   }
@@ -718,8 +829,9 @@
     $("#shardLabel").textContent = state.shards;
     $("#inventoryBadge").hidden = state.inventory.length === 0;
     $("#inventoryBadge").textContent = state.inventory.length;
-    $("#modeLabel").textContent = state.mode === "progress" ? "自动推进" : `重复第${state.currentStage}关`;
-    $("#modeButton").textContent = state.mode === "progress" ? "切换为重复刷图" : "恢复自动推进";
+    const planNames = { progress: "主线推进", gear: `装备刷取 · 第${state.planStage}关`, materials: `材料积累 · 第${state.planStage}关`, boss: "BOSS专注 · 第10关" };
+    $("#modeLabel").textContent = planNames[state.idlePlan] || "主线推进";
+    $("#modeButton").textContent = state.idlePlan === "progress" ? "切换装备刷取" : "恢复主线推进";
     const need = L.xpNeeded(state.level);
     $("#xpText").textContent = state.level >= 10 ? "冒险等级已满" : `冒险经验 ${Math.floor(state.xp)} / ${need}`;
     $("#xpFill").style.width = state.level >= 10 ? "100%" : `${state.xp / need * 100}%`;
@@ -749,7 +861,13 @@
     }).join("");
     const boss = game.enemies.find(e => e.def.boss && !e.dead);
     $("#bossBar").hidden = !boss;
-    if (boss) { $("#bossName").textContent = boss.def.name; $("#bossHpFill").style.width = `${boss.hp / boss.maxHp * 100}%`; $("#bossHpText").textContent = `${Math.ceil(boss.hp)} / ${boss.maxHp}`; }
+    if (boss) {
+      const ratio = boss.hp / boss.maxHp;
+      const phase = ratio > .6 ? "第一阶段 · 花藤试探" : ratio > .3 ? "第二阶段 · 自然祝福与召唤" : "第三阶段 · 花冠守护";
+      $("#bossName").textContent = boss.def.name; $("#bossHpFill").style.width = `${ratio * 100}%`;
+      $("#bossHpText").textContent = `${Math.ceil(boss.hp)} / ${boss.maxHp}${boss.shield > 0 ? ` · 护盾 ${Math.ceil(boss.shield)}` : ""}`;
+      $("#bossPhase").textContent = phase;
+    }
     renderTopUI();
   }
 
@@ -792,24 +910,30 @@
       const q = L.qualityById(item.quality);
       const users = item.slot === "weapon" ? [item.charId] : state.formation;
       const legend = item.legendaryId ? Object.values(L.LEGENDARIES).find(x => x.id === item.legendaryId) : null;
-      detail = `<div style="--rarity:${q.color}"><small>${L.SLOT_NAMES[item.slot]} · 物品等级 ${item.level}</small><h3 class="rarity-name">${q.name} · ${item.name}</h3><ul class="item-stats">${itemStatsHtml(item)}</ul>${legend ? `<div class="legend-effect"><b>传说能力</b><br>${legend.effect}</div>` : ""}<div class="button-row">${users.map(id => `<button class="primary-button" data-equip="${id}">给${L.CHARACTERS[id].name}穿戴</button>`).join("")}<button class="secondary-button" data-lock>${item.locked ? "解除锁定" : "锁定"}</button><button class="secondary-button" data-salvage ${item.locked || item.quality === "legendary" ? "disabled" : ""}>分解</button></div></div>`;
+      const comparisons = users.map(id => { const c = L.compareItem(state, item, id); return c ? `<div class="compare-row"><b>${L.CHARACTERS[id].name}</b><span class="${c.dpsPct >= 0 ? "up" : "down"}">伤害 ${c.dpsPct >= 0 ? "+" : ""}${Math.round(c.dpsPct * 100)}%</span><span class="${c.survivalPct >= 0 ? "up" : "down"}">生存 ${c.survivalPct >= 0 ? "+" : ""}${Math.round(c.survivalPct * 100)}%</span><small>${c.special.length ? `特殊：${c.special.join("、")}` : "无特殊联动变化"}</small></div>` : ""; }).join("");
+      detail = `<div style="--rarity:${q.color}"><small>${L.SLOT_NAMES[item.slot]} · 物品等级 ${item.level}</small><h3 class="rarity-name">${q.name} · ${item.name}</h3><ul class="item-stats">${itemStatsHtml(item)}</ul>${legend ? `<div class="legend-effect"><b>传说能力</b><br>${legend.effect}</div>` : ""}<div class="compare-box"><b>替换收益预览</b>${comparisons}</div><p class="drop-source">掉落来源：${L.itemDropSource(item)}</p><div class="button-row">${users.map(id => `<button class="primary-button" data-equip="${id}">给${L.CHARACTERS[id].name}穿戴</button>`).join("")}<button class="secondary-button" data-lock>${item.locked ? "解除锁定" : "锁定"}</button><button class="secondary-button" data-salvage ${item.locked || item.quality === "legendary" ? "disabled" : ""}>分解</button></div></div>`;
     }
-    $("#drawerBody").innerHTML = `<div class="inventory-tools"><span>容量 <b>${state.inventory.length}</b> / 60</span><button class="secondary-button" data-sort>按品质整理</button></div><div class="inventory-layout"><section class="panel-card"><div class="inventory-grid">${slots || "<div class='empty-state'>背包还是空的</div>"}</div></section><section class="panel-card item-detail">${detail}</section></div>`;
+    $("#drawerBody").innerHTML = `<div class="inventory-tools"><span>容量 <b>${state.inventory.length}</b> / 60</span><button class="secondary-button" data-sort>按品质整理</button><button class="secondary-button" data-codex>装备图鉴</button></div><div class="inventory-layout"><section class="panel-card"><div class="inventory-grid">${slots || "<div class='empty-state'>背包还是空的</div>"}</div></section><section class="panel-card item-detail">${detail}</section></div>`;
   }
 
   function renderFormation() {
     const units = state.formation.map((id, index) => { const c = L.CHARACTERS[id]; return `<div class="formation-unit"><div class="portrait ${id}">${c.icon}</div><b>${c.name}</b><small>${c.title}</small><div class="reorder"><button data-move="${index}:left" ${index === 0 ? "disabled" : ""}>←</button><button data-move="${index}:right" ${index === 3 ? "disabled" : ""}>→</button></div></div>${index < 3 ? '<span class="formation-arrow">›</span>' : ""}`; }).join("");
     const tactics = Object.entries(L.TACTICS).map(([id, t]) => `<button class="tactic-card ${state.tactic === id ? "active" : ""}" data-tactic="${id}"><b>${t.name}</b><small>${t.desc}</small></button>`).join("");
-    $("#drawerBody").innerHTML = `<section class="panel-card"><div class="section-heading"><div><h3>横向站位</h3><small>左侧为后方，右侧最先接敌；下次关卡开始生效。</small></div></div><div class="formation-line">${units}<div class="enemy-marker">敌人<br>←</div></div></section><section class="panel-card"><div class="section-heading"><h3>自动战术</h3></div><div class="tactic-grid">${tactics}</div></section>`;
+    const presets = [["farm", "刷图套"], ["boss", "BOSS套"]].map(([id, name]) => `<div class="preset-card"><div><b>${name}</b><small>${state.presets[id] ? `已保存 · ${new Date(state.presets[id].savedAt).toLocaleDateString("zh-CN")}` : "尚未保存"}</small></div><button class="secondary-button" data-save-preset="${id}">保存当前</button><button class="primary-button" data-apply-preset="${id}" ${state.presets[id] ? "" : "disabled"}>一键换装</button></div>`).join("");
+    $("#drawerBody").innerHTML = `<section class="panel-card"><div class="section-heading"><div><h3>横向站位</h3><small>左侧为后方，右侧最先接敌；下次关卡开始生效。</small></div></div><div class="formation-line">${units}<div class="enemy-marker">敌人<br>←</div></div></section><section class="panel-card"><div class="section-heading"><h3>自动战术</h3></div><div class="tactic-grid">${tactics}</div></section><section class="panel-card"><div class="section-heading"><div><h3>队伍预设</h3><small>站位、战术与全员装备一起保存。</small></div></div><div class="preset-grid">${presets}</div></section>`;
   }
 
   function renderMap() {
     const cards = L.STAGES.map(stage => {
       const locked = stage.id > state.unlockedStage;
-      return `<button class="stage-card ${stage.id === game.stageId ? "active" : ""} ${locked ? "locked" : ""}" data-stage="${stage.id}" ${locked ? "disabled" : ""}><span class="stage-index">STAGE ${String(stage.id).padStart(2,"0")}</span><b>${stage.name}</b><small>${stage.purpose}</small>${state.firstClears[stage.id] ? '<span class="crown">★</span>' : ""}<span class="record">${state.bestTimes[stage.id] ? `BEST ${state.bestTimes[stage.id]}s` : locked ? "未解锁" : "可挑战"}</span></button>`;
+      const rhythm = stage.id <= 3 ? "短巡逻" : stage.id <= 7 ? "遭遇＋精英" : stage.id < 10 ? "高压混战" : "三阶段首领";
+      return `<button class="stage-card zone-${Math.ceil(stage.id / 3)} ${stage.id === game.stageId ? "active" : ""} ${locked ? "locked" : ""}" data-stage="${stage.id}" ${locked ? "disabled" : ""}><span class="stage-thumb">${stage.id === 10 ? "♞" : stage.id >= 8 ? "♜" : stage.id >= 5 ? "♛" : "❀"}</span><span class="stage-index">STAGE ${String(stage.id).padStart(2,"0")}</span><b>${stage.name}</b><small>${stage.purpose} · ${rhythm}</small>${state.firstClears[stage.id] ? '<span class="crown">★</span>' : ""}<span class="record">${state.bestTimes[stage.id] ? `BEST ${state.bestTimes[stage.id]}s` : locked ? "未解锁" : "可挑战"}</span></button>`;
     }).join("");
     const exchange = state.firstClears[10] ? `<section class="panel-card"><div class="section-heading"><div><h3>花冠工坊</h3><small>40枚花冠碎片可兑换一件指定传说武器。</small></div><b>${state.shards} / 40 ♛</b></div><div class="button-row">${Object.values(L.LEGENDARIES).map(x => `<button class="secondary-button" data-exchange="${x.id}" ${state.shards < 40 ? "disabled" : ""}>兑换${x.name}</button>`).join("")}</div></section>` : "";
-    $("#drawerBody").innerHTML = `<section class="panel-card"><div class="section-heading"><div><h3>晴风花原</h3><small>选择已解锁关卡后立即开始重复挑战。</small></div></div><div class="stage-grid">${cards}</div></section>${exchange}`;
+    const plans = [["progress", "主线推进", "依次挑战新关卡"], ["gear", "装备刷取", "快速巡逻并筛选目标部位"], ["materials", "材料积累", "稳定关卡反复获取金币经验"], ["boss", "BOSS专注", "固定挑战花冠鹿灵"]].map(([id, name, desc]) => `<button class="plan-card ${state.idlePlan === id ? "active" : ""}" data-plan="${id}" ${id === "boss" && state.unlockedStage < 10 ? "disabled" : ""}><b>${name}</b><small>${desc}</small></button>`).join("");
+    const focus = ["all", "weapon", "armor", "accessory"].map(id => `<button class="filter-chip ${state.lootFocus === id ? "active" : ""}" data-focus="${id}">${{all:"全部",weapon:"武器",armor:"防具",accessory:"饰品"}[id]}</button>`).join("");
+    const boss = state.bossRecords;
+    $("#drawerBody").innerHTML = `<section class="panel-card"><div class="section-heading"><div><h3>挂机计划</h3><small>计划会决定通关后的下一目标；重复关卡启用快速巡逻。</small></div></div><div class="plan-grid">${plans}</div><div class="focus-row"><span>装备目标</span>${focus}</div></section><section class="panel-card"><div class="section-heading"><div><h3>晴风花原</h3><small>选择关卡后会设为挂机目标。</small></div></div><div class="stage-grid">${cards}</div></section>${state.unlockedStage >= 10 ? `<section class="panel-card boss-record"><div class="section-heading"><div><h3>花冠鹿灵讨伐纪录</h3><small>阶段线：100—60% 花藤 · 60—30% 治疗召唤 · 30—0% 护盾</small></div></div><div class="record-grid"><div><b>${boss.wins}</b><small>胜利</small></div><div><b>${boss.bestTime || "—"}</b><small>最快秒数</small></div><div><b>${boss.bestDamage}</b><small>最高总伤害</small></div></div><button class="secondary-button" data-last-report ${state.lastBattleReport ? "" : "disabled"}>查看最近战报</button></section>` : ""}${exchange}`;
   }
 
   function renderSkills() {
@@ -822,7 +946,21 @@
   }
 
   function renderSettings() {
-    $("#drawerBody").innerHTML = `<div class="settings-grid"><section class="panel-card"><div class="section-heading"><h3>挂机偏好</h3></div><div class="setting-row"><span>自动分解普通装备</span><button class="toggle ${state.settings.autoCommon ? "on" : ""}" data-setting="autoCommon" aria-label="自动分解普通装备"></button></div><div class="setting-row"><span>自动分解魔法装备</span><button class="toggle ${state.settings.autoMagic ? "on" : ""}" data-setting="autoMagic" aria-label="自动分解魔法装备"></button></div><div class="setting-row"><span>战斗音效</span><button class="toggle ${state.settings.sound ? "on" : ""}" data-setting="sound" aria-label="战斗音效"></button></div><p><small>传说装备和手动锁定装备永远不会被自动分解。</small></p></section><section class="panel-card"><div class="section-heading"><h3>存档管理</h3></div><p><small>游戏会在通关、装备变更和设置调整时自动保存。导出文本可用于备份。</small></p><textarea class="export-box" id="saveBox" placeholder="点击导出，或粘贴存档文本后导入"></textarea><div class="button-row"><button class="secondary-button" data-export>导出存档</button><button class="primary-button" data-import>导入存档</button><button class="danger-button" data-reset>重新开始</button></div></section></div><section class="panel-card"><div class="section-heading"><h3>冒险记录</h3></div><p>累计击败 <b>${state.totalKills}</b> 名敌人 · 通关 <b>${state.totalClears}</b> 次 · 史诗保底 ${state.pity.epic}/40 · 传说保底 ${state.pity.legendary}/180</p></section>`;
+    const protect = ["synergy", "starlight", "inspire", "counter"].map(id => { const a = L.AFFIXES.find(x => x.id === id); return `<button class="filter-chip ${state.settings.protectedAffixes.includes(id) ? "active" : ""}" data-protect="${id}">${a.name}</button>`; }).join("");
+    $("#drawerBody").innerHTML = `<div class="settings-grid"><section class="panel-card"><div class="section-heading"><h3>挂机偏好</h3></div><div class="setting-row"><span>自动分解普通装备</span><button class="toggle ${state.settings.autoCommon ? "on" : ""}" data-setting="autoCommon"></button></div><div class="setting-row"><span>自动分解魔法装备</span><button class="toggle ${state.settings.autoMagic ? "on" : ""}" data-setting="autoMagic"></button></div><div class="setting-row"><span>保留稀有及以上</span><button class="toggle ${state.settings.keepRare ? "on" : ""}" data-setting="keepRare"></button></div><div class="setting-row"><span>重复关卡快速巡逻</span><button class="toggle ${state.settings.quickPatrol ? "on" : ""}" data-setting="quickPatrol"></button></div><div class="setting-row"><span>战斗音效</span><button class="toggle ${state.settings.sound ? "on" : ""}" data-setting="sound"></button></div><p><small>自动分解低于指定等级：</small></p><div class="focus-row">${[0,5,8].map(n => `<button class="filter-chip ${Number(state.settings.autoBelowLevel) === n ? "active" : ""}" data-autolevel="${n}">${n ? `低于 Lv.${n}` : "关闭"}</button>`).join("")}</div><p><small>受保护词条不会被自动分解：</small></p><div class="focus-row">${protect}</div></section><section class="panel-card"><div class="section-heading"><h3>存档管理</h3></div><p><small>v2 存档兼容旧版本；进度、装备与设置均保存在本机。</small></p><textarea class="export-box" id="saveBox" placeholder="点击导出，或粘贴存档文本后导入"></textarea><div class="button-row"><button class="secondary-button" data-export>导出存档</button><button class="primary-button" data-import>导入存档</button><button class="danger-button" data-reset>重新开始</button></div></section></div><section class="panel-card"><div class="section-heading"><h3>冒险记录</h3></div><p>累计击败 <b>${state.totalKills}</b> 名敌人 · 通关 <b>${state.totalClears}</b> 次 · 史诗保底 ${state.pity.epic}/40 · 传说保底 ${state.pity.legendary}/180</p></section>`;
+  }
+
+  function showBattleReport(report) {
+    if (!report) return toast("还没有可查看的战斗记录。", "error");
+    const total = Math.max(1, report.totalDamage || 0);
+    const rows = state.formation.map(id => `<div class="report-row"><b>${L.CHARACTERS[id].name}</b><span><i style="width:${Math.round((report.damageByHero?.[id] || 0) / total * 100)}%"></i></span><em>${Math.round(report.damageByHero?.[id] || 0)}伤害</em><small>承伤 ${Math.round(report.takenByHero?.[id] || 0)} · 技能 ${report.skillsByHero?.[id] || 0}次</small></div>`).join("");
+    showModal(`<span class="eyebrow">BATTLE REPORT</span><h2 id="modalTitle">第${report.stage}关 · ${report.success ? "作战完成" : "挑战失败"}</h2><p>${report.reason || `用时 ${report.seconds} 秒，总伤害 ${report.totalDamage}。`}</p><div class="report-list">${rows}</div><div class="report-metrics"><div><b>${report.synergyBursts || 0}</b><small>协同爆发</small></div><div><b>${report.guardCombos || 0}</b><small>守望突击</small></div><div><b>${report.breakUptime || 0}%</b><small>破甲覆盖</small></div><div><b>${report.starUptime || 0}%</b><small>星痕覆盖</small></div></div>${report.bossHeal ? `<p class="warning-note">花冠鹿灵本次回复了 ${report.bossHeal} 点生命。</p>` : ""}<p class="drop-source">战利品：${report.loot?.length ? report.loot.map(x => x.name).join("、") : "无保留装备"}</p><div class="button-row"><button class="primary-button" data-close-modal>关闭战报</button></div>`, true);
+  }
+
+  function showCodex() {
+    const legends = Object.values(L.LEGENDARIES).map(x => `<div class="codex-card ${state.legendarySeen.includes(x.id) ? "seen" : "unknown"}"><span>${L.CHARACTERS[x.charId].icon}</span><b>${state.legendarySeen.includes(x.id) ? x.name : "未发现的传说"}</b><small>${state.legendarySeen.includes(x.id) ? x.effect : "击败花冠鹿灵后有机会发现"}</small></div>`).join("");
+    const affixes = L.AFFIXES.map(x => `<span class="filter-chip ${state.affixesSeen.includes(x.id) ? "active" : ""}">${state.affixesSeen.includes(x.id) ? x.name : "???"}</span>`).join("");
+    showModal(`<span class="eyebrow">EQUIPMENT CODEX</span><h2 id="modalTitle">装备与传说图鉴</h2><p>发现词条 ${state.affixesSeen.length}/${L.AFFIXES.length} · 传说 ${state.legendarySeen.length}/4</p><div class="codex-grid">${legends}</div><h3>词条记录</h3><div class="focus-row">${affixes}</div>`, true);
   }
 
   function showLegendChoice() {
@@ -839,7 +977,8 @@
     $("#pauseButton").addEventListener("click", () => { game.paused = !game.paused; $("#pauseButton").textContent = game.paused ? "▶" : "Ⅱ"; });
     $("#speedButton").addEventListener("click", () => { game.speed = game.speed === 1 ? 2 : game.speed === 2 ? 4 : 1; renderTopUI(); });
     $("#soundButton").addEventListener("click", () => { state.settings.sound = !state.settings.sound; L.save(state); renderTopUI(); });
-    $("#modeButton").addEventListener("click", () => { state.mode = state.mode === "progress" ? "repeat" : "progress"; L.save(state); renderTopUI(); toast(state.mode === "progress" ? "已恢复自动推进。" : `将重复挑战第${game.stageId}关。`); });
+    $("#modeButton").addEventListener("click", () => { const progress = state.idlePlan !== "progress"; state.idlePlan = progress ? "progress" : "gear"; state.mode = progress ? "progress" : "repeat"; state.planStage = game.stageId; L.save(state); renderTopUI(); toast(progress ? "已恢复主线推进。" : `已切换为第${game.stageId}关装备刷取。`); });
+    $("#reportButton").addEventListener("click", () => showBattleReport(state.lastBattleReport));
     $$(".nav-button").forEach(b => b.addEventListener("click", () => openDrawer(b.dataset.view)));
     $("#closeDrawer").addEventListener("click", closeDrawer); $("#drawerBackdrop").addEventListener("click", closeDrawer);
     $("#modalClose").addEventListener("click", closeModal);
@@ -853,7 +992,15 @@
       if (t.hasAttribute("data-sort")) { state.inventory.sort((a,b) => L.QUALITIES.findIndex(q=>q.id===b.quality)-L.QUALITIES.findIndex(q=>q.id===a.quality)||b.level-a.level); renderInventory(); }
       if (t.dataset.move) { const [indexText, dir] = t.dataset.move.split(":"); const index = Number(indexText), next = index + (dir === "left" ? -1 : 1); [state.formation[index], state.formation[next]] = [state.formation[next], state.formation[index]]; L.save(state); renderFormation(); toast("新站位将在下一次进入关卡时生效。 "); }
       if (t.dataset.tactic) { state.tactic = t.dataset.tactic; L.save(state); renderFormation(); toast(`已切换为${L.TACTICS[state.tactic].name}。`); }
-      if (t.dataset.stage) { state.mode = "repeat"; startStage(Number(t.dataset.stage)); closeDrawer(); }
+      if (t.dataset.stage) { state.mode = "repeat"; state.idlePlan = state.idlePlan === "progress" ? "gear" : state.idlePlan; state.planStage = Number(t.dataset.stage); startStage(Number(t.dataset.stage)); closeDrawer(); }
+      if (t.dataset.plan) { state.idlePlan = t.dataset.plan; state.mode = t.dataset.plan === "progress" ? "progress" : "repeat"; if (t.dataset.plan === "boss") state.planStage = 10; L.save(state); renderMap(); renderTopUI(); toast(`挂机计划已切换为${{progress:"主线推进",gear:"装备刷取",materials:"材料积累",boss:"BOSS专注"}[t.dataset.plan]}。`); }
+      if (t.dataset.focus) { state.lootFocus = t.dataset.focus; L.save(state); renderMap(); }
+      if (t.dataset.savePreset) { L.savePreset(state, t.dataset.savePreset); L.save(state); renderFormation(); toast("当前站位、战术与装备已保存。", "gold"); }
+      if (t.dataset.applyPreset) { const r = L.applyPreset(state, t.dataset.applyPreset); r.ok ? toast("预设已应用，将在下一关刷新战斗属性。", "gold") : toast(r.reason, "error"); L.save(state); renderFormation(); }
+      if (t.dataset.protect) { const list = state.settings.protectedAffixes; const i = list.indexOf(t.dataset.protect); i >= 0 ? list.splice(i, 1) : list.push(t.dataset.protect); L.save(state); renderSettings(); }
+      if (t.dataset.autolevel !== undefined) { state.settings.autoBelowLevel = Number(t.dataset.autolevel); L.save(state); renderSettings(); }
+      if (t.hasAttribute("data-codex")) showCodex();
+      if (t.hasAttribute("data-last-report")) showBattleReport(state.lastBattleReport);
       if (t.dataset.exchange && state.shards >= 40) { const item = L.generateItem(state, 10, { legendaryId: t.dataset.exchange }); state.shards -= 40; L.addItem(state, item); L.save(state); renderMap(); toast(`兑换成功：${item.name}`, "gold"); }
       if (t.dataset.skill) { const r = L.upgradeSkill(state, t.dataset.skill); r.ok ? toast(`${L.CHARACTERS[t.dataset.skill].skill}升至Lv.${r.level}！`, "gold") : toast(r.reason, "error"); L.save(state); renderSkills(); }
       if (t.dataset.setting) { state.settings[t.dataset.setting] = !state.settings[t.dataset.setting]; L.save(state); renderSettings(); renderTopUI(); }

@@ -120,3 +120,37 @@ test("a successful first clear becomes the safe fallback without ten samples", (
   assert.equal(state.lastStableStage, 8);
   assert.equal(state.history[8].length, 1);
 });
+
+test("v2 migration supplies idle plans, protected affixes, presets, and boss records", () => {
+  const state = L.normalizeState({ version: 1, level: 4, settings: { autoCommon: true } });
+  assert.equal(state.version, 2);
+  assert.equal(state.idlePlan, "progress");
+  assert.deepEqual(Object.keys(state.presets).sort(), ["boss", "farm"]);
+  assert.ok(state.settings.protectedAffixes.includes("synergy"));
+  assert.equal(state.bossRecords.wins, 0);
+});
+
+test("protected synergy gear survives auto salvage and exposes comparison data", () => {
+  const state = L.freshState(71);
+  state.settings.autoMagic = true;
+  const item = L.generateItem(state, 7, { minQuality: "magic", slot: "accessory", forceAffixes: ["synergy"] });
+  assert.equal(L.addItem(state, item).kept, true);
+  const comparison = L.compareItem(state, item, "lancer");
+  assert.ok(Number.isFinite(comparison.dpsPct));
+  assert.ok(comparison.special.includes("协同"));
+  assert.match(L.itemDropSource(item), /关卡/);
+});
+
+test("farm and boss presets restore formation, tactic, and equipment without duplicates", () => {
+  const state = L.freshState(81);
+  state.formation = ["knight", "lancer", "archer", "mage"];
+  state.tactic = "guard";
+  assert.equal(L.savePreset(state, "boss").ok, true);
+  state.formation.reverse();
+  state.tactic = "assault";
+  assert.equal(L.applyPreset(state, "boss").ok, true);
+  assert.equal(state.formation[0], "knight");
+  assert.equal(state.tactic, "guard");
+  const ids = Object.values(state.equipment).flatMap(slots => Object.values(slots).filter(Boolean).map(item => item.id));
+  assert.equal(new Set(ids).size, ids.length);
+});

@@ -2,7 +2,7 @@
   "use strict";
 
   const SAVE_KEY = "starwish_demo_save_v1";
-  const SAVE_VERSION = 1;
+  const SAVE_VERSION = 2;
 
   const CHARACTERS = {
     mage: { id: "mage", name: "星璃", title: "星术师", weapon: "book", weaponName: "魔导书", icon: "✦", hp: 145, atk: 24, def: 4, interval: 1.8, crit: .05, range: 320, hpGrowth: 9, atkGrowth: 2.2, skill: "星屑风暴", skillCd: 10, skillBase: 1.4, color: "#a98ee8" },
@@ -109,6 +109,9 @@
       currentStage: 1,
       unlockedStage: 1,
       mode: "progress",
+      idlePlan: "progress",
+      planStage: 1,
+      lootFocus: "all",
       tactic: "balanced",
       formation: ["mage", "archer", "lancer", "knight"],
       skills: { mage: 1, archer: 1, lancer: 1, knight: 1 },
@@ -119,6 +122,10 @@
       history: {},
       pity: { epic: 0, legendary: 0 },
       legendarySeen: [],
+      affixesSeen: [],
+      presets: { farm: null, boss: null },
+      bossRecords: { wins: 0, bestTime: null, bestDamage: 0, drops: [] },
+      lastBattleReport: null,
       failures: 0,
       lastStableStage: 1,
       offlineRemainder: 0,
@@ -127,7 +134,16 @@
       totalClears: 0,
       itemSerial: 1,
       rngState: seed || ((Date.now() ^ 0x51f15e) >>> 0),
-      settings: { sound: true, autoCommon: false, autoMagic: false, autoAdvance: true },
+      settings: {
+        sound: true,
+        autoCommon: false,
+        autoMagic: false,
+        autoAdvance: true,
+        quickPatrol: true,
+        keepRare: true,
+        autoBelowLevel: 0,
+        protectedAffixes: ["synergy", "starlight"]
+      },
       pendingTutorial: 1
     };
     Object.keys(CHARACTERS).forEach(charId => {
@@ -149,6 +165,11 @@
     out.skills = Object.assign({}, base.skills, input.skills || {});
     out.equipment = Object.assign({}, base.equipment, input.equipment || {});
     Object.keys(CHARACTERS).forEach(id => { out.equipment[id] = Object.assign({}, base.equipment[id], (input.equipment || {})[id] || {}); });
+    out.presets = Object.assign({}, base.presets, input.presets || {});
+    out.bossRecords = Object.assign({}, base.bossRecords, input.bossRecords || {});
+    out.settings.protectedAffixes = Array.isArray(out.settings.protectedAffixes) ? out.settings.protectedAffixes.filter(id => AFFIXES.some(a => a.id === id)) : base.settings.protectedAffixes;
+    out.legendarySeen = Array.isArray(out.legendarySeen) ? out.legendarySeen.filter(id => Object.values(LEGENDARIES).some(x => x.id === id)) : [];
+    out.affixesSeen = Array.isArray(out.affixesSeen) ? out.affixesSeen.filter(id => AFFIXES.some(a => a.id === id)) : [];
     out.formation = Array.isArray(input.formation) && input.formation.length === 4 ? input.formation.filter(id => CHARACTERS[id]) : base.formation;
     if (out.formation.length !== 4 || new Set(out.formation).size !== 4) out.formation = base.formation;
     out.inventory = Array.isArray(input.inventory) ? input.inventory.slice(0, 120) : [];
@@ -156,6 +177,9 @@
     out.unlockedStage = clamp(Number(out.unlockedStage) || 1, 1, 10);
     out.currentStage = clamp(Number(out.currentStage) || 1, 1, out.unlockedStage);
     out.lastSeen = Number(out.lastSeen) || Date.now();
+    out.idlePlan = ["progress", "gear", "materials", "boss"].includes(out.idlePlan) ? out.idlePlan : "progress";
+    out.planStage = clamp(Number(out.planStage) || out.currentStage, 1, out.unlockedStage);
+    out.lootFocus = ["all", "weapon", "armor", "accessory"].includes(out.lootFocus) ? out.lootFocus : "all";
     out.version = SAVE_VERSION;
     return out;
   }
@@ -198,6 +222,12 @@
     if (slot === "accessory") { stats.atk = 1 + Math.floor(level / 2); baseName = pick(state, ["风铃护符", "新月耳坠", "星芽徽章"]); }
     const allowed = AFFIXES.filter(a => a.slots.includes(slot));
     const affixes = [];
+    (options.forceAffixes || []).forEach(id => {
+      const def = allowed.find(a => a.id === id);
+      if (def && affixes.length < quality.affixes && !affixes.some(a => a.id === id)) {
+        affixes.push({ id: def.id, value: Number(def.max.toFixed(4)) });
+      }
+    });
     while (affixes.length < quality.affixes && affixes.length < allowed.length) {
       const affix = pick(state, allowed);
       if (!affixes.some(a => a.id === affix.id)) affixes.push({ id: affix.id, value: Number(randRange(state, affix.min, affix.max).toFixed(4)) });
@@ -211,12 +241,16 @@
       locked: quality.id === "legendary", created: Date.now()
     };
     if (legendary && !state.legendarySeen.includes(legendary.id)) state.legendarySeen.push(legendary.id);
+    affixes.forEach(a => { if (!state.affixesSeen.includes(a.id)) state.affixesSeen.push(a.id); });
     return item;
   }
 
   function addItem(state, item) {
     const q = qualityById(item.quality);
-    const shouldSalvage = (item.quality === "common" && state.settings.autoCommon) || (item.quality === "magic" && state.settings.autoMagic);
+    const protectedAffix = (item.affixes || []).some(a => (state.settings.protectedAffixes || []).includes(a.id));
+    const protectedQuality = state.settings.keepRare && ["rare", "epic", "legendary"].includes(item.quality);
+    const belowLevel = Number(state.settings.autoBelowLevel) > 0 && item.level < Number(state.settings.autoBelowLevel);
+    const shouldSalvage = !protectedAffix && !protectedQuality && ((item.quality === "common" && state.settings.autoCommon) || (item.quality === "magic" && state.settings.autoMagic) || belowLevel);
     if (shouldSalvage && item.quality !== "legendary" && !item.locked) {
       const gold = 4 + item.level * (q.id === "magic" ? 2 : 1);
       state.gold += gold;
@@ -287,6 +321,26 @@
     return raw;
   }
 
+  function compareItem(state, item, charId) {
+    if (!item || !CHARACTERS[charId] || item.slot === "weapon" && item.charId !== charId) return null;
+    const before = characterStats(state, charId);
+    const preview = normalizeState(JSON.parse(JSON.stringify(state)));
+    preview.equipment[charId][item.slot] = JSON.parse(JSON.stringify(item));
+    const after = characterStats(preview, charId);
+    const beforeDps = before.atk / before.interval * (1 + before.crit * (before.critDmg - 1));
+    const afterDps = after.atk / after.interval * (1 + after.crit * (after.critDmg - 1));
+    const beforeSurvival = before.maxHp * (1 + before.def / 100);
+    const afterSurvival = after.maxHp * (1 + after.def / 100);
+    return {
+      atk: after.atk - before.atk,
+      hp: after.maxHp - before.maxHp,
+      def: after.def - before.def,
+      dpsPct: beforeDps ? (afterDps / beforeDps - 1) : 0,
+      survivalPct: beforeSurvival ? (afterSurvival / beforeSurvival - 1) : 0,
+      special: itemAffixDetails(item).filter(a => ["armorBreakDmg", "starDmg", "inspire", "counter"].includes(a.stat)).map(a => a.name)
+    };
+  }
+
   function equipItem(state, itemId, charId) {
     const index = state.inventory.findIndex(x => x.id === itemId);
     if (index < 0 || !CHARACTERS[charId]) return { ok: false, reason: "找不到这件装备。" };
@@ -308,6 +362,49 @@
     state.inventory.splice(index, 1);
     state.gold += value;
     return { ok: true, gold: value };
+  }
+
+  function savePreset(state, presetId) {
+    if (!["farm", "boss"].includes(presetId)) return { ok: false, reason: "预设类型无效。" };
+    const equipmentIds = {};
+    Object.keys(CHARACTERS).forEach(charId => {
+      equipmentIds[charId] = {};
+      Object.entries(state.equipment[charId] || {}).forEach(([slot, item]) => { equipmentIds[charId][slot] = item ? item.id : null; });
+    });
+    state.presets[presetId] = { formation: [...state.formation], tactic: state.tactic, equipmentIds, savedAt: Date.now() };
+    return { ok: true };
+  }
+
+  function applyPreset(state, presetId) {
+    const preset = state.presets[presetId];
+    if (!preset) return { ok: false, reason: "这个预设还没有保存。" };
+    const pool = [];
+    state.inventory.forEach(item => pool.push(item));
+    Object.values(state.equipment).forEach(slots => Object.values(slots || {}).forEach(item => { if (item) pool.push(item); }));
+    const byId = new Map(pool.map(item => [item.id, item]));
+    const used = new Set();
+    const nextEquipment = {};
+    Object.keys(CHARACTERS).forEach(charId => {
+      nextEquipment[charId] = {};
+      ["weapon", "armor", "accessory"].forEach(slot => {
+        const wanted = preset.equipmentIds?.[charId]?.[slot];
+        const item = wanted ? byId.get(wanted) : null;
+        if (item && !used.has(item.id) && (slot !== "weapon" || item.charId === charId)) {
+          nextEquipment[charId][slot] = item;
+          used.add(item.id);
+        } else {
+          const fallback = state.equipment[charId][slot] || null;
+          nextEquipment[charId][slot] = fallback && !used.has(fallback.id) ? fallback : null;
+          if (nextEquipment[charId][slot]) used.add(nextEquipment[charId][slot].id);
+        }
+      });
+    });
+    const equippedIds = new Set(Object.values(nextEquipment).flatMap(slots => Object.values(slots).filter(Boolean).map(item => item.id)));
+    state.inventory = pool.filter(item => !equippedIds.has(item.id)).filter((item, index, arr) => arr.findIndex(x => x.id === item.id) === index).slice(0, 120);
+    state.equipment = nextEquipment;
+    state.formation = Array.isArray(preset.formation) ? [...preset.formation] : state.formation;
+    state.tactic = TACTICS[preset.tactic] ? preset.tactic : state.tactic;
+    return { ok: true };
   }
 
   function addExperience(state, amount) {
@@ -341,7 +438,7 @@
     };
   }
 
-  function recordRun(state, stage, success, seconds) {
+  function recordRun(state, stage, success, seconds, report) {
     if (!state.history[stage]) state.history[stage] = [];
     state.history[stage].push({ success: !!success, seconds: Math.round(seconds * 10) / 10, at: Date.now() });
     state.history[stage] = state.history[stage].slice(-10);
@@ -354,6 +451,21 @@
       const recent = state.history[stage];
       if (recent.length >= 3 && recent.filter(x => x.success).length / recent.length >= .9) state.lastStableStage = Math.max(state.lastStableStage, stage);
     }
+    if (report) state.lastBattleReport = report;
+    if (Number(stage) === 10 && report) {
+      state.bossRecords.bestDamage = Math.max(state.bossRecords.bestDamage || 0, report.totalDamage || 0);
+      if (success) {
+        state.bossRecords.wins = (state.bossRecords.wins || 0) + 1;
+        if (!state.bossRecords.bestTime || seconds < state.bossRecords.bestTime) state.bossRecords.bestTime = Math.round(seconds * 10) / 10;
+      }
+    }
+  }
+
+  function itemDropSource(item) {
+    if (item?.legendaryId) return "花冠鹿灵：首通选择、1%掉落或40碎片兑换";
+    if (item?.slot === "weapon") return "第3、7关首通与所有已解锁关卡";
+    if (item?.quality === "epic") return "第7—10关效率更高（全局史诗保底共享）";
+    return "晴风花原所有关卡；高关卡提供更高物品等级";
   }
 
   function calculateOffline(state, now) {
@@ -415,8 +527,8 @@
   const API = {
     SAVE_KEY, SAVE_VERSION, CHARACTERS, ENEMIES, STAGES, QUALITIES, AFFIXES, LEGENDARIES, SLOT_NAMES, SLOT_ICONS, TACTICS,
     clamp, xpNeeded, hpMultiplier, atkMultiplier, damage, freshState, normalizeState, rngNext, qualityById,
-    generateItem, addItem, itemAffixDetails, characterStats, equipItem, salvageItem, addExperience, skillCost, upgradeSkill,
-    rewardForEnemy, recordRun, calculateOffline, save, load, exportSave, importSave
+    generateItem, addItem, itemAffixDetails, characterStats, compareItem, equipItem, salvageItem, savePreset, applyPreset, addExperience, skillCost, upgradeSkill,
+    rewardForEnemy, recordRun, itemDropSource, calculateOffline, save, load, exportSave, importSave
   };
 
   global.StarwishLogic = API;
