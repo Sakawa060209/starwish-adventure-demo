@@ -7,6 +7,14 @@
   const canvas = $("#battleCanvas");
   const ctx = canvas.getContext("2d");
   ctx.imageSmoothingEnabled = false;
+  const spriteManifest = window.STARWISH_SPRITES || {};
+  const spriteImages = Object.fromEntries(Object.entries(spriteManifest).map(([id, frames]) => [id, frames.map(frame => {
+    const image = new Image();
+    image.decoding = "async";
+    image.src = frame.src;
+    return image;
+  })]));
+  const spriteReady = Promise.allSettled(Object.values(spriteImages).flat().map(image => image.decode()));
 
   let state = L.load();
   let selectedItemId = null;
@@ -113,14 +121,14 @@
   function closeModal() { $("#modalBackdrop").hidden = true; }
 
   function createHeroes(resetHealth) {
-    const spacing = 78;
+    const spacing = 92;
     return state.formation.map((id, index) => {
       const stats = L.characterStats(state, id);
       const old = !resetHealth && game.heroes.find(h => h.id === id);
       return {
         id, def: L.CHARACTERS[id], stats,
-        x: 150 + index * spacing,
-        homeX: 150 + index * spacing,
+        x: 105 + index * spacing,
+        homeX: 105 + index * spacing,
         hp: old ? Math.min(stats.maxHp, old.hp) : stats.maxHp,
         atkCd: .3 + index * .16,
         skillCd: 2.5 + index * .45,
@@ -718,6 +726,38 @@
     const leg = hero.action === "run" ? runSteps[runFrame] : strike ? (hero.id === "lancer" ? 7 : 3) : windup ? -3 : 0;
     const clothLag = hero.action === "run" ? runSteps[(runFrame + 6) % 8] : strike ? -6 : 0;
     const recoil = hero.action === "hurt" ? -4 : 0;
+    const frames = spriteManifest[hero.id];
+    const images = spriteImages[hero.id];
+    if (frames && images) {
+      let spriteIndex = 0;
+      if (hero.down || hero.action === "hurt") spriteIndex = 5;
+      else if (hero.action === "run") spriteIndex = [1, 1, 2, 2, 1, 1, 2, 2][runFrame];
+      else if (hero.action === "skill") spriteIndex = attackFrame < 2 ? 3 : 4;
+      else if (hero.action === "attack") spriteIndex = attackFrame < 6 ? 3 : 0;
+      const frame = frames[spriteIndex], image = images[spriteIndex];
+      if (image?.complete && image.naturalWidth) {
+        const spriteScale = { mage: .32, archer: .32, lancer: .335, knight: .345 }[hero.id];
+        const visualOffset = game.phase === "combat" && hero.id === "lancer" ? -18 : 0;
+        ctx.save();
+        ctx.translate(Math.round(hero.x) + recoil + visualOffset, GROUND + bob);
+        ctx.globalAlpha = hero.down ? .58 : 1;
+        ctx.imageSmoothingEnabled = false;
+        ctx.drawImage(
+          image,
+          Math.round(-frame.anchorX * spriteScale),
+          Math.round(-frame.anchorY * spriteScale),
+          Math.round(frame.width * spriteScale),
+          Math.round(frame.height * spriteScale)
+        );
+        if (!hero.down) {
+          const hpW = 48, ratio = hero.hp / hero.stats.maxHp;
+          drawPixel(-24, -140, hpW, 6, "rgba(24,25,36,.62)");
+          drawPixel(-23, -139, Math.max(0, (hpW - 2) * ratio), 4, ratio < .3 ? "#f06f78" : "#78d989");
+        }
+        ctx.restore();
+        return;
+      }
+    }
     ctx.save(); ctx.translate(Math.round(hero.x) + recoil, GROUND + bob); ctx.scale(1.12, 1.12);
     if (strike) { ctx.translate(hero.id === "lancer" ? 6 : hero.id === "archer" ? -2 : 3, 0); ctx.rotate(hero.id === "knight" ? -.045 : hero.id === "lancer" ? -.025 : hero.id === "mage" ? .025 : 0); }
     if (hero.down) { ctx.rotate(Math.PI / 2.55); ctx.translate(0, 13); }
@@ -1053,7 +1093,7 @@
     $$(".nav-button").forEach(b => b.classList.toggle("active", b.dataset.view === "battle"));
   }
 
-  function portraitHtml(id) { return `<div class="portrait ${id}" aria-hidden="true"><span class="p-hair"></span><span class="p-face"><i></i></span><span class="p-accent"></span></div>`; }
+  function portraitHtml(id) { return `<div class="portrait ${id}" aria-hidden="true"><span class="p-hair"></span><span class="p-face"><i></i></span><span class="p-accent"></span><img class="portrait-art" src="assets/sprites/${id}-portrait.png" alt=""></div>`; }
   function itemIcon(item) { return `<span class="gear-sprite ${item.slot} ${item.charId || "shared"}"><i></i></span>`; }
   function itemStatsHtml(item) {
     const stats = [];
@@ -1185,8 +1225,14 @@
     document.addEventListener("visibilitychange", () => { if (document.hidden) L.save(state); });
   }
 
-  function init() {
+  async function init() {
     bindEvents();
+    const startButton = $("#startButton");
+    startButton.disabled = true;
+    startButton.textContent = "读取角色素材…";
+    await spriteReady;
+    startButton.disabled = false;
+    startButton.textContent = "踏上冒险";
     game.heroes = createHeroes(true);
     updateStageUI(); renderBattleHud();
     if (state.started) {

@@ -233,6 +233,7 @@ button:disabled { filter: grayscale(.7); opacity: .5; cursor: not-allowed; trans
 .portrait .p-hair { position: absolute; z-index: 3; left: 7px; top: 5px; width: 32px; height: 17px; border: 2px solid #403b58; border-bottom: 0; }
 .portrait .p-hair::after { content: ""; position: absolute; left: 2px; top: 11px; width: 7px; height: 18px; background: inherit; box-shadow: 21px 1px 0 -1px currentColor; }
 .portrait .p-accent { position: absolute; z-index: 4; }
+.portrait .portrait-art { position: absolute; z-index: 6; inset: 0; width: 100%; height: 100%; object-fit: cover; image-rendering: pixelated; }
 .portrait.mage { background: linear-gradient(145deg, #31346d 0 45%, #c8b7ef 46%); }
 .portrait.mage .p-hair { color: #725bb2; background: #a78bdc; border-color: #332c57; }
 .portrait.mage .p-face::before { background: #66519a; box-shadow: 10px 0 #66519a; }
