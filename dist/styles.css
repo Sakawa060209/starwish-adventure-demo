@@ -197,8 +197,9 @@ button { color: inherit; }
 .start-card h1 { margin: 5px 0 -3px; font-size: clamp(42px, 7vw, 64px); letter-spacing: .12em; color: #477bc9; text-shadow: 3px 3px 0 #d9ecff; }
 .start-card .subtitle { margin: 0; color: #e9809e; font-weight: 900; letter-spacing: .35em; }
 .party-preview { display: flex; justify-content: center; gap: 10px; margin: 20px 0 14px; }
-.mini { display: grid; place-items: center; width: 46px; height: 50px; border: 3px solid white; outline: 2px solid #3b5170; box-shadow: var(--pixel-shadow); font-weight: 900; font-size: 22px; }
-.mini.mage { background: #c8b4ff; }.mini.archer { background: #a8e9ba; }.mini.lancer { background: #f7acc1; }.mini.knight { background: #a8d3ff; }
+.party-preview .portrait { width: 54px; height: 58px; box-shadow: 3px 3px #a5adbd; }
+.party-preview .portrait .p-face { left: 16px; top: 17px; }
+.party-preview .portrait .p-hair { left: 11px; top: 9px; }
 .start-card > p:not(.subtitle) { line-height: 1.7; color: #52647c; }
 .start-card > small { display: block; margin-top: 14px; color: #8693a5; }
 
@@ -226,16 +227,32 @@ button:disabled { filter: grayscale(.7); opacity: .5; cursor: not-allowed; trans
 .hero-card { min-width: 0; display: grid; grid-template-columns: 48px 1fr 34px; align-items: center; gap: 8px; padding: 9px 13px; background: #f8fbff; position: relative; }
 .hero-card.down { filter: grayscale(.8); opacity: .68; }
 .portrait { width: 46px; height: 46px; position: relative; overflow: hidden; flex: 0 0 auto; border: 3px solid #fff9e9; outline: 2px solid #46536c; box-shadow: 2px 2px #a5adbd; background: #dce8ef; image-rendering: pixelated; }
-.portrait .p-face { position: absolute; left: 12px; top: 13px; width: 23px; height: 23px; z-index: 2; background: #ffd4ba; border: 2px solid #463f57; }
+.portrait .p-face { position: absolute; left: 12px; top: 13px; width: 23px; height: 23px; z-index: 2; background: #ffd4ba; border: 2px solid #403746; }
 .portrait .p-face::before { content: ""; position: absolute; left: 4px; top: 9px; width: 3px; height: 4px; background: #39445f; box-shadow: 10px 0 #39445f; }
 .portrait .p-face i { position: absolute; left: 10px; bottom: 4px; width: 5px; height: 2px; background: #d27882; }
 .portrait .p-hair { position: absolute; z-index: 3; left: 7px; top: 5px; width: 32px; height: 17px; border: 2px solid #403b58; border-bottom: 0; }
 .portrait .p-hair::after { content: ""; position: absolute; left: 2px; top: 11px; width: 7px; height: 18px; background: inherit; box-shadow: 21px 1px 0 -1px currentColor; }
 .portrait .p-accent { position: absolute; z-index: 4; }
-.portrait.mage { background: #c9c1e9; }.portrait.mage .p-hair { color: #7969b8; background: #a48fd8; }.portrait.mage .p-accent { left: 4px; top: 2px; width: 38px; height: 6px; background: #6354a2; box-shadow: 8px -2px #8170c5; }
-.portrait.archer { background: #b9dfc2; }.portrait.archer .p-hair { color: #3f8b5e; background: #67b87e; }.portrait.archer .p-accent { right: 2px; top: 4px; width: 11px; height: 7px; background: #e9cf65; transform: rotate(-30deg); }
-.portrait.lancer { background: #f0c1ce; }.portrait.lancer .p-hair { color: #b84e73; background: #e27496; }.portrait.lancer .p-accent { left: 2px; top: 8px; width: 11px; height: 9px; background: #ffd0dc; box-shadow: 30px 3px #b84e73; }
-.portrait.knight { background: #c5dded; }.portrait.knight .p-hair { color: #8cacc4; background: #d5e6f0; }.portrait.knight .p-accent { left: 3px; bottom: 2px; width: 13px; height: 19px; background: #75add5; border: 2px solid #416b91; }
+.portrait.mage { background: linear-gradient(145deg, #31346d 0 45%, #c8b7ef 46%); }
+.portrait.mage .p-hair { color: #725bb2; background: #a78bdc; border-color: #332c57; }
+.portrait.mage .p-face::before { background: #66519a; box-shadow: 10px 0 #66519a; }
+.portrait.mage .p-accent { left: 3px; top: 1px; width: 39px; height: 7px; background: #252952; border-bottom: 2px solid #d5a74d; box-shadow: 8px -2px #343772; }
+.portrait.mage .p-accent::after { content: ""; position: absolute; left: 9px; top: 2px; width: 4px; height: 4px; background: #f2c968; box-shadow: 11px 1px #f2c968, 23px -1px #dba94b; }
+.portrait.archer { background: linear-gradient(145deg, #3d5943 0 44%, #cad8be 45%); }
+.portrait.archer .p-hair { color: #718f87; background: #a5beb6; border-color: #394b45; }
+.portrait.archer .p-face::before { background: #755b43; box-shadow: 10px 0 #755b43; }
+.portrait.archer .p-accent { right: 2px; top: 3px; width: 13px; height: 7px; background: #496046; transform: rotate(-28deg); box-shadow: -7px 4px #6d8058; }
+.portrait.archer .p-accent::after { content: ""; position: absolute; left: 3px; top: 1px; width: 5px; height: 5px; background: #f5ebcf; box-shadow: 1px 0 #d9ac4f; }
+.portrait.lancer { background: linear-gradient(145deg, #a72f53 0 44%, #f1c2cd 45%); }
+.portrait.lancer .p-hair { color: #bd365e; background: #ed6d8e; border-color: #653044; }
+.portrait.lancer .p-hair::after { height: 25px; width: 9px; box-shadow: 20px 1px 0 -1px currentColor, -7px 8px 0 1px #dc5277; }
+.portrait.lancer .p-face::before { background: #a63c60; box-shadow: 10px 0 #a63c60; }
+.portrait.lancer .p-accent { left: 2px; top: 7px; width: 12px; height: 10px; background: #8d2347; border: 2px solid #d2a149; box-shadow: 31px 3px #f3a1b2; }
+.portrait.knight { background: linear-gradient(145deg, #234e98 0 44%, #d7deea 45%); }
+.portrait.knight .p-hair { color: #aaaabd; background: #e5e4ea; border-color: #414258; }
+.portrait.knight .p-face::before { background: #315a9d; box-shadow: 10px 0 #315a9d; }
+.portrait.knight .p-accent { left: 1px; top: 8px; width: 13px; height: 9px; background: #173f87; border: 2px solid #c99b4c; box-shadow: 31px 2px #2859aa; }
+.portrait.knight .p-accent::after { content: ""; position: absolute; left: 5px; top: 9px; width: 4px; height: 18px; background: #2859aa; box-shadow: 1px 14px #d4a44f; }
 .hero-meta { min-width: 0; }
 .hero-meta header { display: flex; justify-content: space-between; gap: 4px; font-size: 12px; margin-bottom: 4px; }
 .hero-meta header span { color: var(--muted); font-size: 10px; }

@@ -113,14 +113,14 @@
   function closeModal() { $("#modalBackdrop").hidden = true; }
 
   function createHeroes(resetHealth) {
-    const spacing = 62;
+    const spacing = 72;
     return state.formation.map((id, index) => {
       const stats = L.characterStats(state, id);
       const old = !resetHealth && game.heroes.find(h => h.id === id);
       return {
         id, def: L.CHARACTERS[id], stats,
-        x: 195 + index * spacing,
-        homeX: 195 + index * spacing,
+        x: 165 + index * spacing,
+        homeX: 165 + index * spacing,
         hp: old ? Math.min(stats.maxHp, old.hp) : stats.maxHp,
         atkCd: .3 + index * .16,
         skillCd: 2.5 + index * .45,
@@ -320,6 +320,7 @@
       target.breakT = 5;
       addEffect("text", target.x, GROUND - 112, "破甲", "#ffad67", .9);
       addEffect("thrust", target.x - 35, GROUND - 45, "", "#ff9bae", .55);
+      addEffect("petals", target.x, GROUND - 62, "", "#f06f91", .85);
     } else if (hero.id === "archer") {
       shoot(hero, target, multiplier / 3, "skill-arrow", 3);
       addEffect("text", hero.x + 40, GROUND - 105, "星羽连射", "#c7ffcf", .8);
@@ -725,52 +726,93 @@
     const outline = "#2e3b55", skin = "#ffd4ba", light = "#fff1df";
     const legs = (boot, sock) => { drawPixel(-11 - leg, -21, 9, 21, outline); drawPixel(4 + leg, -21, 9, 21, outline); drawPixel(-9 - leg, -19, 6, 13, sock); drawPixel(6 + leg, -19, 6, 13, sock); drawPixel(-11 - leg, -6, 10, 6, boot); drawPixel(4 + leg, -6, 11, 6, boot); };
     if (hero.id === "mage") {
-      legs("#51428d", "#ece7ff");
-      drawPixel(-17, -50, 34, 30, outline); drawPixel(-14, -48, 28, 26, "#7563c7"); drawPixel(-12, -46, 7, 21, "#a995ec");
-      drawPixel(-14, -31, 28, 5, "#51428d"); drawPixel(-11, -25, 8, 5, "#9280dc"); drawPixel(3, -25, 8, 5, "#6652b1");
-      drawPixel(-16, -66, 31, 22, skin); drawPixel(-18, -73, 35, 16, "#a995e5"); drawPixel(-19, -65, 9, 24, "#8a72d1"); drawPixel(10, -64, 8, 26, "#765fb9");
-      drawPixel(-13, -63, 8, 5, light); drawPixel(8, -60, 4, 4, "#3c4770");
-      drawPixel(-17, -82, 38, 9, outline); drawPixel(-12, -91, 28, 12, outline); drawPixel(-9, -89, 23, 9, "#6c5bbb"); drawPixel(13, -96, 8, 16, "#9c83e0");
-      drawPixel(-20 - clothLag * .35, -42, 7, 24, "#5b4aa7");
-      drawPixel(10, -46, 12, 9, "#6553b5"); drawPixel(18, -42, 9, 6, skin); drawPixel(22, -41, 7, 3, light);
-      const float = strike ? 12 : windup ? -3 : 0; drawPixel(19 + float, -49 - (hero.action === "skill" ? 4 : 0), 25, 20, outline); drawPixel(22 + float, -46 - (hero.action === "skill" ? 4 : 0), 8, 14, "#e8ddff"); drawPixel(33 + float, -46 - (hero.action === "skill" ? 4 : 0), 8, 14, "#b7d7ff");
-      if (hero.action === "skill" || victory) for (let i = 0; i < 4; i++) drawPixel(19 + i * 10, -83 - (i % 2) * 8, 6, 6, i % 2 ? "#9ee8ff" : "#f4ddff");
+      const hairLag = clothLag * .7;
+      drawPixel(-35 - hairLag, -72, 22, 10, "#6955a6"); drawPixel(-43 - hairLag, -64, 30, 9, "#8069c2");
+      drawPixel(-48 - hairLag, -55, 34, 9, "#9a81da"); drawPixel(-42 - hairLag, -46, 29, 8, "#b39bed");
+      drawPixel(-32 - hairLag * .6, -37, 20, 8, "#735db2"); drawPixel(-51 - hairLag, -58, 9, 5, "#d0c0ff");
+      drawPixel(-27 - clothLag * .55, -52, 13, 37, "#1e234d"); drawPixel(-35 - clothLag * .8, -40, 13, 28, "#313368");
+      drawPixel(-30 - clothLag, -18, 9, 10, "#cf9d45"); drawPixel(-28 - clothLag, -9, 5, 7, "#494078");
+      legs("#282342", "#55485f");
+      drawPixel(-18, -53, 36, 34, outline); drawPixel(-15, -51, 30, 29, "#262b5a"); drawPixel(-12, -49, 9, 23, "#46458b");
+      drawPixel(-13, -48, 22, 10, "#fff5e8"); drawPixel(-15, -33, 30, 6, "#c89643"); drawPixel(-12, -27, 10, 7, "#f1e7e4"); drawPixel(3, -27, 10, 7, "#5950a0");
+      drawPixel(-19, -49, 8, 28, "#333570"); drawPixel(-24 - clothLag * .25, -30, 9, 17, "#5d55a0");
+      drawPixel(-17, -68, 32, 23, skin); drawPixel(-20, -77, 37, 20, "#8f75d0"); drawPixel(-20, -69, 9, 29, "#765eb6"); drawPixel(10, -66, 8, 29, "#a68ce2");
+      drawPixel(-14, -65, 8, 5, light); drawPixel(7, -62, 4, 4, "#513e74"); drawPixel(10, -74, 8, 8, "#c9baff");
+      drawPixel(-20, -84, 38, 11, outline); drawPixel(-17, -87, 34, 12, "#20264f"); drawPixel(-8, -90, 26, 9, "#34376e");
+      drawPixel(-10, -87, 5, 5, "#d7a64b"); drawPixel(0, -85, 4, 4, "#f1cb68"); drawPixel(10, -82, 5, 5, "#d7a64b");
+      drawPixel(10, -49, 12, 9, "#34376e"); drawPixel(18, -44, 10, 6, skin); drawPixel(23, -42, 7, 3, light);
+      const float = strike ? 13 : windup ? -3 : 0, bookY = -51 - (hero.action === "skill" ? 6 : 0);
+      drawPixel(19 + float, bookY, 28, 22, outline); drawPixel(22 + float, bookY + 3, 10, 16, "#f8eddc"); drawPixel(34 + float, bookY + 3, 10, 16, "#2a315f");
+      drawPixel(36 + float, bookY + 7, 5, 5, "#d9a94c"); drawPixel(28 + float, bookY + 8, 3, 3, "#b78ee9");
+      if (hero.action === "skill" || victory) for (let i = 0; i < 5; i++) drawPixel(17 + i * 10, -84 - (i % 2) * 8, i === 2 ? 7 : 5, i === 2 ? 7 : 5, i % 2 ? "#d6a750" : "#b8a1ff");
     } else if (hero.id === "archer") {
-      legs("#4d6d4e", "#dff6d9");
-      drawPixel(-20, -51, 34, 31, outline); drawPixel(-17, -48, 28, 27, "#3f9f63"); drawPixel(-17, -48, 8, 26, "#71ca89"); drawPixel(-22, -43, 9, 24, "#2f704a");
-      drawPixel(-17, -31, 28, 5, "#745a3d"); drawPixel(-14, -26, 10, 6, "#66bd7e"); drawPixel(2, -26, 9, 6, "#2e8050");
-      drawPixel(-17, -67, 31, 23, skin); drawPixel(-20, -73, 35, 17, "#66bf81"); drawPixel(-21, -66, 9, 24, "#4da66c");
-      drawPixel(-15, -64, 8, 5, light); drawPixel(7, -61, 4, 4, "#385268");
-      drawPixel(-17, -80, 27, 9, "#397f52"); drawPixel(-9, -85, 24, 9, "#75cc8e");
-      drawPixel(-24, -54, 9, 25, "#775039"); drawPixel(-28, -49, 7, 17, "#c18d56");
-      drawPixel(9, -48, 12, 8, "#368854"); drawPixel(17, -45, 11, 6, skin); drawPixel(24, -44, 7, 3, light);
-      drawPixel(-25 - clothLag * .35, -67, 9, 8, "#85dc99"); drawPixel(-32 - clothLag * .7, -63, 14, 7, "#5eaf74");
+      const hairLag = clothLag * .65;
+      drawPixel(-31 - hairLag, -69, 19, 9, "#6e8f89"); drawPixel(-39 - hairLag, -61, 27, 9, "#8eaaa2");
+      drawPixel(-44 - hairLag, -52, 31, 8, "#a9c4bb"); drawPixel(-38 - hairLag, -43, 25, 8, "#bfd5cc");
+      drawPixel(-28 - hairLag * .7, -35, 16, 8, "#779992");
+      drawPixel(-31 - clothLag * .5, -56, 17, 39, "#334d3d"); drawPixel(-39 - clothLag * .8, -43, 18, 30, "#4b674d");
+      drawPixel(-36 - clothLag, -20, 12, 8, "#e9dfc4"); drawPixel(-32 - clothLag, -13, 6, 9, "#5f7656");
+      legs("#493b35", "#4d4543");
+      drawPixel(-19, -52, 35, 33, outline); drawPixel(-16, -50, 29, 29, "#f2ead9"); drawPixel(-13, -48, 9, 22, "#fff8e9");
+      drawPixel(-17, -37, 31, 8, "#554637"); drawPixel(-15, -30, 28, 6, "#c69a4d"); drawPixel(-12, -25, 10, 6, "#f6eddd"); drawPixel(2, -25, 10, 6, "#6a7859");
+      drawPixel(-23, -50, 11, 29, "#3f5b43"); drawPixel(-27 - clothLag * .2, -29, 10, 17, "#71826a");
+      drawPixel(-18, -68, 32, 23, skin); drawPixel(-21, -76, 37, 20, "#9eb9b0"); drawPixel(-21, -68, 9, 28, "#789991"); drawPixel(10, -65, 8, 27, "#b8cec6");
+      drawPixel(-14, -65, 8, 5, light); drawPixel(7, -62, 4, 4, "#5f594f");
+      drawPixel(-19, -82, 18, 8, "#314638"); drawPixel(-11, -86, 7, 9, "#657655"); drawPixel(-6, -83, 7, 7, "#d9b45b"); drawPixel(-2, -88, 5, 6, "#f7f0d5");
+      drawPixel(-25, -54, 9, 27, "#6e5239"); drawPixel(-29, -50, 7, 19, "#aa7945"); drawPixel(-31, -47, 4, 4, "#efe7d4");
+      drawPixel(8, -49, 13, 8, "#4b6248"); drawPixel(17, -46, 12, 6, skin); drawPixel(25, -45, 7, 3, light);
       const bowY = victory ? -9 : 0;
-      ctx.strokeStyle = "#82572f"; ctx.lineWidth = 5; ctx.beginPath(); ctx.arc(28 + (strike ? 7 : 0), -43 + bowY, 22, -1.25, 1.25); ctx.stroke();
-      ctx.strokeStyle = "#f4fff0"; ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(35 + (strike ? 7 : 0), -63 + bowY); ctx.lineTo(strike ? 12 : 27, -43 + bowY); ctx.lineTo(35 + (strike ? 7 : 0), -22 + bowY); ctx.stroke();
+      ctx.strokeStyle = "#6d4b2e"; ctx.lineWidth = 6; ctx.beginPath(); ctx.arc(28 + (strike ? 7 : 0), -43 + bowY, 23, -1.25, 1.25); ctx.stroke();
+      ctx.strokeStyle = "#c59a50"; ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(28 + (strike ? 7 : 0), -43 + bowY, 23, -1.25, 1.25); ctx.stroke();
+      drawPixel(24 + (strike ? 7 : 0), -66 + bowY, 8, 5, "#41543a"); drawPixel(39 + (strike ? 7 : 0), -57 + bowY, 8, 5, "#6d844d"); drawPixel(42 + (strike ? 7 : 0), -34 + bowY, 8, 5, "#41543a");
+      ctx.strokeStyle = "#f4fff0"; ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(35 + (strike ? 7 : 0), -64 + bowY); ctx.lineTo(strike ? 12 : 27, -43 + bowY); ctx.lineTo(35 + (strike ? 7 : 0), -21 + bowY); ctx.stroke();
     } else if (hero.id === "lancer") {
-      legs("#743d58", "#ffe5ed");
-      drawPixel(-18, -51, 35, 31, outline); drawPixel(-15, -48, 29, 27, "#df6686"); drawPixel(-14, -46, 8, 22, "#f69db4"); drawPixel(-24, -33, 12, 8, "#f4b0c2");
-      drawPixel(-15, -31, 29, 5, "#8e405e"); drawPixel(-12, -25, 10, 5, "#f49ab1"); drawPixel(3, -25, 10, 5, "#c45173");
-      drawPixel(-16, -67, 31, 23, skin); drawPixel(-19, -76, 35, 20, "#ed87a5"); drawPixel(-21, -66, 9, 27, "#d65f82");
-      drawPixel(-12, -64, 8, 5, light); drawPixel(8, -61, 4, 4, "#4b4763");
-      drawPixel(-12, -84, 8, 10, "#ffd0dc"); drawPixel(-6, -88, 8, 14, "#df6f91");
-      drawPixel(7, -50, 13, 8, "#b94c70"); drawPixel(15, -47, 13, 6, skin); drawPixel(20, -40, 12, 6, skin);
-      drawPixel(-25 - clothLag * .25, -69, 10, 11, "#f4a4ba"); drawPixel(-35 - clothLag * .7, -64, 17, 9, "#d85e82"); drawPixel(-42 - clothLag, -58, 14, 8, "#b84870");
-      const thrust = strike ? 22 : windup ? -9 : victory ? -13 : 0; const spearY = victory ? -66 : windup ? -51 : -45; drawPixel(6 + thrust, spearY, 73, 5, "#f7e8cd"); drawPixel(5 + thrust, spearY + 1, 70, 2, "#fff9e9"); drawPixel(76 + thrust, spearY - 5, 16, 15, "#dc5e82"); drawPixel(88 + thrust, spearY - 1, 9, 7, "#ffb4c4");
+      const hairLag = clothLag * .8;
+      drawPixel(-29 - hairLag, -77, 17, 10, "#b8335b"); drawPixel(-39 - hairLag, -70, 27, 10, "#d94f76");
+      drawPixel(-49 - hairLag, -61, 37, 10, "#ee7392"); drawPixel(-53 - hairLag, -51, 40, 9, "#f58ca5");
+      drawPixel(-47 - hairLag, -42, 34, 8, "#d94d73"); drawPixel(-37 - hairLag, -34, 24, 8, "#b9325d");
+      drawPixel(-53 - hairLag, -53, 8, 6, "#ffc0ce"); drawPixel(-44 - clothLag, -24, 15, 7, "#f0839e");
+      drawPixel(-30 - clothLag * .55, -49, 16, 35, "#fff0ea"); drawPixel(-38 - clothLag * .85, -36, 18, 25, "#c33b60");
+      drawPixel(-42 - clothLag, -18, 12, 7, "#d5a34d"); drawPixel(-39 - clothLag, -11, 8, 8, "#8d2449");
+      legs("#542d3b", "#f6d1d8");
+      drawPixel(-19, -53, 37, 34, outline); drawPixel(-16, -50, 31, 29, "#fff0e9"); drawPixel(-13, -48, 9, 21, "#fffaf3");
+      drawPixel(-17, -42, 31, 9, "#972d4f"); drawPixel(-15, -34, 30, 7, "#d2a147"); drawPixel(-12, -27, 10, 7, "#fff2ec"); drawPixel(3, -27, 10, 7, "#cb3f62");
+      drawPixel(-23, -51, 10, 29, "#a72f51"); drawPixel(-28 - clothLag * .2, -30, 11, 17, "#e56b87");
+      drawPixel(-17, -69, 32, 23, skin); drawPixel(-20, -78, 37, 21, "#ef6689"); drawPixel(-21, -69, 9, 29, "#ca3c63"); drawPixel(10, -66, 8, 28, "#fa93a9");
+      drawPixel(-14, -66, 8, 5, light); drawPixel(7, -63, 4, 4, "#6e334c");
+      drawPixel(-17, -85, 11, 9, "#8d2449"); drawPixel(-9, -89, 8, 13, "#c89946"); drawPixel(-3, -86, 7, 7, "#f6b0bf");
+      drawPixel(7, -51, 14, 9, "#a12c50"); drawPixel(16, -48, 13, 6, skin); drawPixel(21, -41, 12, 6, "#5c3140");
+      const thrust = strike ? 24 : windup ? -10 : victory ? -14 : 0; const spearY = victory ? -67 : windup ? -53 : -45;
+      drawPixel(4 + thrust, spearY, 78, 5, "#432c34"); drawPixel(5 + thrust, spearY + 1, 76, 2, "#c99547");
+      drawPixel(79 + thrust, spearY - 7, 18, 18, "#821f43"); drawPixel(84 + thrust, spearY - 10, 21, 12, "#e54c70"); drawPixel(100 + thrust, spearY - 6, 10, 7, "#ffd2d9");
+      drawPixel(70 + thrust, spearY + 6, 15, 5, "#b92d56"); drawPixel(79 + thrust, spearY + 10, 7, 14, "#d9486b");
     } else {
-      legs("#435f85", "#edf7ff");
-      drawPixel(-22, -50, 37, 30, outline); drawPixel(-19, -47, 31, 27, "#4f8fd0"); drawPixel(-17, -45, 9, 22, "#8dc7ef"); drawPixel(-25, -48, 9, 28, "#e8f5ff");
-      drawPixel(-19, -31, 31, 6, "#315d96"); drawPixel(-15, -25, 10, 5, "#7fc0ea"); drawPixel(2, -25, 10, 5, "#3b79b7");
-      drawPixel(-17, -67, 31, 23, skin); drawPixel(-19, -75, 34, 18, "#d7e9f4"); drawPixel(-20, -66, 8, 22, "#b9d4e7"); drawPixel(10, -64, 7, 21, "#a8c7df");
-      drawPixel(-14, -64, 8, 5, light); drawPixel(7, -61, 4, 4, "#354c68");
-      drawPixel(-23 - clothLag * .35, -58, 12, 8, "#ffe176"); drawPixel(-28 - clothLag * .7, -42, 17, 30, "#8ecdf1"); drawPixel(-25 - clothLag * .7, -39, 11, 23, "#dff5ff");
-      drawPixel(7, -48, 13, 9, "#3e75b2"); drawPixel(15, -43, 11, 7, skin); drawPixel(21, -41, 7, 4, light);
-      const swing = victory ? -82 : windup ? -72 : strike ? 24 : attackFrame >= 5 ? 8 : -4; ctx.save(); ctx.translate(13, -39); ctx.rotate(swing * Math.PI / 180); drawPixel(0, -4, 46, 7, "#dcefff"); drawPixel(3, -3, 39, 2, "#ffffff"); drawPixel(7, -8, 6, 15, "#ffd368"); ctx.restore();
+      const hairLag = clothLag * .65;
+      drawPixel(-33 - hairLag, -73, 20, 9, "#aaaabd"); drawPixel(-42 - hairLag, -65, 29, 9, "#c7c7d4");
+      drawPixel(-49 - hairLag, -56, 36, 9, "#e6e4ec"); drawPixel(-44 - hairLag, -47, 32, 8, "#f4f2f1");
+      drawPixel(-34 - hairLag * .7, -38, 22, 8, "#c6c5d2"); drawPixel(-49 - hairLag, -58, 8, 5, "#ffffff");
+      drawPixel(-29 - clothLag * .55, -57, 16, 42, "#173f87"); drawPixel(-39 - clothLag * .82, -44, 19, 31, "#2454a2");
+      drawPixel(-38 - clothLag, -20, 13, 8, "#d1a24a"); drawPixel(-34 - clothLag, -12, 7, 10, "#173f87");
+      drawPixel(-32 - clothLag * .7, -43, 6, 6, "#e8bd5d"); drawPixel(-36 - clothLag * .8, -33, 4, 4, "#f5d377");
+      legs("#332d35", "#4c4144");
+      drawPixel(-12 - leg, -13, 8, 4, "#c69a4b"); drawPixel(5 + leg, -13, 8, 4, "#c69a4b");
+      drawPixel(-19, -53, 37, 34, outline); drawPixel(-16, -50, 31, 29, "#fff5ea"); drawPixel(-13, -48, 9, 22, "#ffffff");
+      drawPixel(-17, -44, 31, 13, "#332d33"); drawPixel(-14, -41, 5, 7, "#c49a51"); drawPixel(-5, -43, 5, 10, "#5c493d");
+      drawPixel(-17, -31, 31, 6, "#c99b4c"); drawPixel(-13, -26, 11, 7, "#fff7ee"); drawPixel(3, -26, 10, 7, "#244f99");
+      drawPixel(-24, -51, 10, 29, "#244f99"); drawPixel(-29 - clothLag * .2, -31, 11, 18, "#3769b5");
+      drawPixel(-17, -69, 32, 23, skin); drawPixel(-20, -78, 37, 21, "#e8e7ed"); drawPixel(-21, -69, 9, 29, "#b7b7c6"); drawPixel(10, -66, 8, 28, "#f6f4f2");
+      drawPixel(-14, -66, 8, 5, light); drawPixel(7, -63, 4, 4, "#335b9d");
+      drawPixel(-23, -80, 11, 7, "#1c438b"); drawPixel(-27, -76, 9, 13, "#2a5aaa"); drawPixel(-18, -82, 5, 5, "#d6a54d");
+      drawPixel(7, -51, 14, 9, "#342f36"); drawPixel(16, -48, 13, 6, skin); drawPixel(23, -44, 9, 5, "#332e35");
+      const swing = victory ? -82 : windup ? -72 : strike ? 24 : attackFrame >= 5 ? 8 : -4;
+      ctx.save(); ctx.translate(13, -41); ctx.rotate(swing * Math.PI / 180);
+      drawPixel(0, -2, 55, 4, "#809dcc"); drawPixel(4, -2, 48, 2, "#f8fbff"); drawPixel(51, -3, 8, 6, "#dceaff");
+      drawPixel(4, -8, 7, 16, "#c89543"); drawPixel(-1, -4, 11, 8, "#282d3b"); drawPixel(1, -3, 9, 2, "#e1b45b");
+      ctx.restore();
     }
     if (!hero.down) {
       const hpW = 44, ratio = hero.hp / hero.stats.maxHp;
-      drawPixel(-22, -90, hpW, 5, "rgba(34,49,65,.55)"); drawPixel(-21, -89, Math.max(0, (hpW - 2) * ratio), 3, ratio < .3 ? "#f06f78" : "#78d989");
+      drawPixel(-22, -105, hpW, 5, "rgba(34,49,65,.55)"); drawPixel(-21, -104, Math.max(0, (hpW - 2) * ratio), 3, ratio < .3 ? "#f06f78" : "#78d989");
     }
     ctx.restore();
   }
@@ -856,6 +898,13 @@
       }
       if (e.type === "slash") { ctx.strokeStyle = e.color; ctx.lineWidth = 8; ctx.beginPath(); ctx.arc(0, 0, 46 + p * 15, -1.15, 1.15); ctx.stroke(); }
       if (e.type === "thrust") { ctx.fillStyle = e.color; ctx.fillRect(-20, -3, 80 * (1 - p * .4), 6); }
+      if (e.type === "petals") {
+        ctx.fillStyle = e.color;
+        for (let i = 0; i < 10; i++) {
+          const a = i * .72 + p * 1.8, r = 18 + p * (28 + i * 3);
+          ctx.save(); ctx.translate(Math.cos(a) * r, Math.sin(a) * r * .62); ctx.rotate(a); ctx.fillRect(-4, -2, 9, 5); ctx.restore();
+        }
+      }
       if (e.type === "starstorm") { ctx.fillStyle = e.color; for (let i = 0; i < 12; i++) { const a = i * 2.4; const r = 20 + i * 7 * p; ctx.fillRect(Math.cos(a) * r - 3, -45 + Math.sin(a) * 26 + p * 30, 7, 7); } }
       if (e.type === "vine") { ctx.strokeStyle = e.color; ctx.lineWidth = 7; ctx.beginPath(); ctx.moveTo(-32, 20); ctx.quadraticCurveTo(0, -80 * (1 - p), 30, 12); ctx.stroke(); }
       if (e.type === "synergy") {
