@@ -113,14 +113,14 @@
   function closeModal() { $("#modalBackdrop").hidden = true; }
 
   function createHeroes(resetHealth) {
-    const spacing = 72;
+    const spacing = 78;
     return state.formation.map((id, index) => {
       const stats = L.characterStats(state, id);
       const old = !resetHealth && game.heroes.find(h => h.id === id);
       return {
         id, def: L.CHARACTERS[id], stats,
-        x: 165 + index * spacing,
-        homeX: 165 + index * spacing,
+        x: 150 + index * spacing,
+        homeX: 150 + index * spacing,
         hp: old ? Math.min(stats.maxHp, old.hp) : stats.maxHp,
         atkCd: .3 + index * .16,
         skillCd: 2.5 + index * .45,
@@ -718,12 +718,13 @@
     const leg = hero.action === "run" ? runSteps[runFrame] : strike ? (hero.id === "lancer" ? 7 : 3) : windup ? -3 : 0;
     const clothLag = hero.action === "run" ? runSteps[(runFrame + 6) % 8] : strike ? -6 : 0;
     const recoil = hero.action === "hurt" ? -4 : 0;
-    ctx.save(); ctx.translate(Math.round(hero.x) + recoil, GROUND + bob); ctx.scale(1.06, 1.06);
+    ctx.save(); ctx.translate(Math.round(hero.x) + recoil, GROUND + bob); ctx.scale(1.12, 1.12);
     if (strike) { ctx.translate(hero.id === "lancer" ? 6 : hero.id === "archer" ? -2 : 3, 0); ctx.rotate(hero.id === "knight" ? -.045 : hero.id === "lancer" ? -.025 : hero.id === "mage" ? .025 : 0); }
     if (hero.down) { ctx.rotate(Math.PI / 2.55); ctx.translate(0, 13); }
     ctx.globalAlpha = hero.down ? .55 : 1;
-    drawPixel(-24, -3, 50, 7, "rgba(42,59,65,.24)");
-    const outline = "#2e3b55", skin = "#ffd4ba", light = "#fff1df";
+    drawPixel(-29, -3, 58, 6, "rgba(31,27,36,.2)"); drawPixel(-20, -2, 40, 3, "rgba(35,30,39,.2)");
+    const outline = "#242333", skin = "#f5c4a9", light = "#fff0db";
+    const cluster = (color, cells) => cells.forEach(([x, y, w = 3, h = 3]) => drawPixel(x, y, w, h, color));
     const legs = (boot, sock) => { drawPixel(-11 - leg, -21, 9, 21, outline); drawPixel(4 + leg, -21, 9, 21, outline); drawPixel(-9 - leg, -19, 6, 13, sock); drawPixel(6 + leg, -19, 6, 13, sock); drawPixel(-11 - leg, -6, 10, 6, boot); drawPixel(4 + leg, -6, 11, 6, boot); };
     if (hero.id === "mage") {
       const hairLag = clothLag * .7;
@@ -744,6 +745,12 @@
       const float = strike ? 13 : windup ? -3 : 0, bookY = -51 - (hero.action === "skill" ? 6 : 0);
       drawPixel(19 + float, bookY, 28, 22, outline); drawPixel(22 + float, bookY + 3, 10, 16, "#f8eddc"); drawPixel(34 + float, bookY + 3, 10, 16, "#2a315f");
       drawPixel(36 + float, bookY + 7, 5, 5, "#d9a94c"); drawPixel(28 + float, bookY + 8, 3, 3, "#b78ee9");
+      cluster("#d8c8ff", [[-38 - hairLag, -62, 4, 2], [-31 - hairLag, -70, 6, 2], [-43 - hairLag, -52, 5, 2], [-30 - hairLag, -44, 4, 2], [12, -72, 3, 5]]);
+      cluster("#171a38", [[-29 - hairLag, -68, 3, 7], [-36 - hairLag, -58, 3, 7], [-31 - clothLag * .55, -45, 3, 18], [-15, -50, 3, 19], [10, -38, 3, 7]]);
+      cluster("#e5b95d", [[-11, -42, 3, 3], [-3, -37, 3, 3], [6, -32, 3, 3], [-22 - clothLag * .6, -35, 3, 3], [-27 - clothLag, -15, 3, 4], [-8, -10, 4, 3], [7, -11, 4, 3]]);
+      cluster("#f7f1e9", [[-9, -49, 4, 3], [1, -47, 4, 2], [-9, -26, 4, 3], [8, -23, 3, 2]]);
+      cluster("#c1adf1", [[-31 - hairLag, -66, 1, 8], [-39 - hairLag, -57, 1, 7], [-34 - hairLag, -48, 1, 6], [14, -63, 1, 9]]);
+      cluster("#f0c86e", [[-24 - clothLag * .6, -46, 1, 7], [-27 - clothLag * .7, -38, 7, 1], [-22 - clothLag * .7, -29, 1, 6], [-8, -31, 1, 5], [6, -39, 1, 5]]);
       if (hero.action === "skill" || victory) for (let i = 0; i < 5; i++) drawPixel(17 + i * 10, -84 - (i % 2) * 8, i === 2 ? 7 : 5, i === 2 ? 7 : 5, i % 2 ? "#d6a750" : "#b8a1ff");
     } else if (hero.id === "archer") {
       const hairLag = clothLag * .65;
@@ -766,6 +773,12 @@
       ctx.strokeStyle = "#c59a50"; ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(28 + (strike ? 7 : 0), -43 + bowY, 23, -1.25, 1.25); ctx.stroke();
       drawPixel(24 + (strike ? 7 : 0), -66 + bowY, 8, 5, "#41543a"); drawPixel(39 + (strike ? 7 : 0), -57 + bowY, 8, 5, "#6d844d"); drawPixel(42 + (strike ? 7 : 0), -34 + bowY, 8, 5, "#41543a");
       ctx.strokeStyle = "#f4fff0"; ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(35 + (strike ? 7 : 0), -64 + bowY); ctx.lineTo(strike ? 12 : 27, -43 + bowY); ctx.lineTo(35 + (strike ? 7 : 0), -21 + bowY); ctx.stroke();
+      cluster("#d9ebe4", [[-34 - hairLag, -60, 4, 2], [-27 - hairLag, -68, 5, 2], [-39 - hairLag, -50, 4, 2], [-31 - hairLag, -42, 4, 2], [11, -69, 3, 5]]);
+      cluster("#27382f", [[-27 - hairLag, -65, 3, 7], [-35 - hairLag, -54, 3, 7], [-32 - clothLag * .5, -49, 3, 17], [-15, -48, 3, 17], [8, -37, 3, 7]]);
+      cluster("#d6ac58", [[-10, -37, 3, 3], [-2, -34, 3, 3], [7, -30, 3, 3], [-24 - clothLag * .6, -31, 3, 3], [-29 - clothLag, -16, 3, 4], [-8, -10, 4, 3], [7, -11, 4, 3]]);
+      cluster("#fff8e9", [[-10, -48, 4, 3], [0, -45, 4, 2], [-9, -25, 4, 3], [7, -22, 3, 2]]);
+      cluster("#d0e2db", [[-29 - hairLag, -64, 1, 8], [-36 - hairLag, -55, 1, 7], [-31 - hairLag, -46, 1, 6], [14, -61, 1, 9]]);
+      cluster("#c9a257", [[-27 - clothLag * .6, -43, 1, 7], [-31 - clothLag * .7, -35, 7, 1], [-26 - clothLag * .7, -27, 1, 6], [-8, -30, 1, 5], [6, -36, 1, 5]]);
     } else if (hero.id === "lancer") {
       const hairLag = clothLag * .8;
       drawPixel(-29 - hairLag, -77, 17, 10, "#b8335b"); drawPixel(-39 - hairLag, -70, 27, 10, "#d94f76");
@@ -786,6 +799,12 @@
       drawPixel(4 + thrust, spearY, 78, 5, "#432c34"); drawPixel(5 + thrust, spearY + 1, 76, 2, "#c99547");
       drawPixel(79 + thrust, spearY - 7, 18, 18, "#821f43"); drawPixel(84 + thrust, spearY - 10, 21, 12, "#e54c70"); drawPixel(100 + thrust, spearY - 6, 10, 7, "#ffd2d9");
       drawPixel(70 + thrust, spearY + 6, 15, 5, "#b92d56"); drawPixel(79 + thrust, spearY + 10, 7, 14, "#d9486b");
+      cluster("#ffc0ce", [[-35 - hairLag, -68, 4, 2], [-28 - hairLag, -75, 5, 2], [-44 - hairLag, -58, 5, 2], [-47 - hairLag, -48, 4, 2], [11, -71, 3, 5]]);
+      cluster("#7d2342", [[-28 - hairLag, -71, 3, 8], [-38 - hairLag, -61, 3, 8], [-41 - hairLag, -49, 3, 8], [-30 - clothLag * .55, -43, 3, 18], [-15, -47, 3, 16]]);
+      cluster("#e5b45c", [[-10, -41, 3, 3], [-1, -36, 3, 3], [8, -32, 3, 3], [-25 - clothLag * .6, -30, 3, 3], [-37 - clothLag, -15, 3, 4], [-8, -10, 4, 3], [7, -11, 4, 3]]);
+      cluster("#fff7ed", [[-10, -49, 4, 3], [0, -46, 4, 2], [-9, -26, 4, 3], [7, -23, 3, 2]]);
+      cluster("#ffb7c7", [[-31 - hairLag, -71, 1, 9], [-41 - hairLag, -61, 1, 8], [-45 - hairLag, -50, 1, 7], [14, -62, 1, 9]]);
+      cluster("#f1c36b", [[-27 - clothLag * .6, -44, 1, 7], [-31 - clothLag * .7, -36, 7, 1], [-35 - clothLag * .8, -27, 1, 6], [-8, -32, 1, 5], [6, -39, 1, 5]]);
     } else {
       const hairLag = clothLag * .65;
       drawPixel(-33 - hairLag, -73, 20, 9, "#aaaabd"); drawPixel(-42 - hairLag, -65, 29, 9, "#c7c7d4");
@@ -809,7 +828,26 @@
       drawPixel(0, -2, 55, 4, "#809dcc"); drawPixel(4, -2, 48, 2, "#f8fbff"); drawPixel(51, -3, 8, 6, "#dceaff");
       drawPixel(4, -8, 7, 16, "#c89543"); drawPixel(-1, -4, 11, 8, "#282d3b"); drawPixel(1, -3, 9, 2, "#e1b45b");
       ctx.restore();
+      cluster("#ffffff", [[-36 - hairLag, -64, 5, 2], [-29 - hairLag, -72, 5, 2], [-44 - hairLag, -54, 5, 2], [-39 - hairLag, -46, 4, 2], [11, -70, 3, 5]]);
+      cluster("#6f7186", [[-27 - hairLag, -68, 3, 7], [-37 - hairLag, -59, 3, 7], [-34 - clothLag * .55, -47, 3, 17], [-15, -48, 3, 17], [9, -36, 3, 7]]);
+      cluster("#e2b55b", [[-11, -41, 3, 3], [-2, -37, 3, 3], [7, -33, 3, 3], [-27 - clothLag * .6, -35, 3, 3], [-32 - clothLag, -17, 3, 4], [-8, -10, 4, 3], [7, -11, 4, 3]]);
+      cluster("#ffffff", [[-10, -49, 4, 3], [0, -47, 4, 2], [-9, -26, 4, 3], [7, -23, 3, 2]]);
+      cluster("#ffffff", [[-30 - hairLag, -69, 1, 9], [-39 - hairLag, -59, 1, 8], [-40 - hairLag, -49, 1, 7], [14, -62, 1, 9]]);
+      cluster("#e6bd68", [[-25 - clothLag * .6, -47, 1, 7], [-30 - clothLag * .7, -38, 7, 1], [-31 - clothLag * .8, -29, 1, 6], [-8, -32, 1, 5], [6, -39, 1, 5]]);
     }
+    const faceY = hero.id === "lancer" || hero.id === "knight" ? -69 : -68;
+    const eyeColor = { mage: "#6650a7", archer: "#7b6749", lancer: "#a9355b", knight: "#315d9e" }[hero.id];
+    const rimColor = { mage: "#d8c6ff", archer: "#d9eadc", lancer: "#ffc3ce", knight: "#f8f7ff" }[hero.id];
+    const blink = Math.floor(time * 2.1 + hero.homeX * .013) % 13 === 0;
+    drawPixel(4, faceY + 6, 8, 2, "#6a4d4d");
+    if (blink) drawPixel(7, faceY + 10, 5, 2, outline);
+    else {
+      drawPixel(7, faceY + 9, 5, 6, outline); drawPixel(8, faceY + 10, 3, 4, eyeColor); drawPixel(9, faceY + 10, 2, 2, "#fffdf6");
+    }
+    drawPixel(12, faceY + 14, 3, 2, "#d89282"); drawPixel(5, faceY + 16, 3, 2, "#eaa399");
+    drawPixel(10, faceY + 19, 5, 2, "#6e3d49"); drawPixel(1, faceY + 21, 8, 4, skin);
+    cluster(rimColor, [[13, faceY + 3, 2, 4], [15, faceY + 8, 2, 5], [14, -49, 2, 5], [13, -29, 2, 4], [12 + leg, -18, 2, 5]]);
+    cluster("rgba(255,207,111,.82)", [[-16, -52, 2, 3], [-18, -36, 2, 3], [-12, -20, 2, 3], [9, -8, 2, 2]]);
     if (!hero.down) {
       const hpW = 44, ratio = hero.hp / hero.stats.maxHp;
       drawPixel(-22, -105, hpW, 5, "rgba(34,49,65,.55)"); drawPixel(-21, -104, Math.max(0, (hpW - 2) * ratio), 3, ratio < .3 ? "#f06f78" : "#78d989");
