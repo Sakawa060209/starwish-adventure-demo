@@ -1,11 +1,53 @@
 {
   "name": "starwish-adventure-demo",
-  "version": "0.6.0",
+  "version": "0.7.0",
   "private": true,
+  "author": "Sakawa060209",
+  "homepage": "https://sakawa060209.github.io/starwish-adventure-demo/",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Sakawa060209/starwish-adventure-demo.git"
+  },
+  "main": "electron/main.cjs",
   "description": "《星愿物语：少女冒险团》零构建浏览器Demo",
   "scripts": {
     "test": "node --test tests/logic.test.js",
     "smoke": "node tests/browser-smoke.cjs",
-    "test:full": "node tests/full-run.cjs"
+    "test:full": "node tests/full-run.cjs",
+    "test:desktop": "node tests/electron-smoke.cjs",
+    "desktop": "electron electron/main.cjs",
+    "build:win": "electron-builder --win portable --x64"
+  },
+  "devDependencies": {
+    "electron": "45.0.0",
+    "electron-builder": "26.15.3"
+  },
+  "build": {
+    "appId": "com.starwish.adventure",
+    "productName": "星愿物语",
+    "electronDist": "node_modules/electron/dist",
+    "asar": true,
+    "compression": "maximum",
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "electron/**/*",
+      "index.html",
+      "styles.css",
+      "logic.js",
+      "game.js",
+      "favicon.svg",
+      "assets/sprites/**/*"
+    ],
+    "win": {
+      "target": [
+        {
+          "target": "portable",
+          "arch": ["x64"]
+        }
+      ],
+      "artifactName": "Starwish-Adventure-${version}-Windows-${arch}.${ext}"
+    }
   }
 }

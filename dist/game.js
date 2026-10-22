@@ -14,7 +14,10 @@
     image.src = frame.src;
     return image;
   })]));
-  const spriteReady = Promise.allSettled(Object.values(spriteImages).flat().map(image => image.decode()));
+  const heroMotionFx = new Image();
+  heroMotionFx.decoding = "async";
+  heroMotionFx.src = "assets/sprites/hero-motion-fx.png";
+  const spriteReady = Promise.allSettled([...Object.values(spriteImages).flat(), heroMotionFx].map(image => image.decode()));
 
   let state = L.load();
   let selectedItemId = null;
@@ -26,6 +29,12 @@
   let audioCtx = null;
   const STEP = .05;
   const GROUND = 394;
+  const HERO_ACTION_TIME = {
+    knight: { attack: .66, skill: .96, hurt: .34 },
+    lancer: { attack: .62, skill: .92, hurt: .34 },
+    archer: { attack: .74, skill: 1.02, hurt: .32 },
+    mage: { attack: .78, skill: 1.08, hurt: .34 }
+  };
 
   const game = {
     running: false,
@@ -108,7 +117,7 @@
     el.textContent = text;
     el.style.color = color || "white";
     $("#lootFloat").appendChild(el);
-    if (legendary) { addEffect("synergy", 585, 235, "", "#ffe37a", 1.2); game.heroes.filter(h => !h.down).forEach(h => { h.action = "victory"; h.actionT = Math.max(h.actionT, 1.4); }); }
+    if (legendary) { addEffect("synergy", 585, 235, "", "#ffe37a", 1.2); game.heroes.filter(h => !h.down).forEach(h => setHeroAction(h, "victory", Math.max(h.actionT, 1.4))); }
     setTimeout(() => el.remove(), 1700);
   }
 
@@ -121,23 +130,30 @@
   function closeModal() { $("#modalBackdrop").hidden = true; }
 
   function createHeroes(resetHealth) {
-    const spacing = 92;
+    const spacing = 108;
     return state.formation.map((id, index) => {
       const stats = L.characterStats(state, id);
       const old = !resetHealth && game.heroes.find(h => h.id === id);
       return {
         id, def: L.CHARACTERS[id], stats,
-        x: 105 + index * spacing,
-        homeX: 105 + index * spacing,
+        x: 88 + index * spacing,
+        homeX: 88 + index * spacing,
         hp: old ? Math.min(stats.maxHp, old.hp) : stats.maxHp,
         atkCd: .3 + index * .16,
         skillCd: 2.5 + index * .45,
-        action: "idle", actionT: 0,
+        action: "idle", actionT: 0, actionDuration: 0, actionSerial: 0,
         down: false, guardCd: 0, empowered: false,
         attackCount: 0, inspireCd: 0, counterCd: 0,
         damageDone: 0, damageTaken: 0
       };
     });
+  }
+
+  function setHeroAction(hero, action, duration) {
+    hero.action = action;
+    hero.actionT = duration;
+    hero.actionDuration = duration;
+    hero.actionSerial = (hero.actionSerial || 0) + 1;
   }
 
   function startStage(stageId, silent) {
@@ -276,7 +292,7 @@
   }
 
   function normalAttack(hero, target) {
-    hero.action = "attack"; hero.actionT = .58;
+    setHeroAction(hero, "attack", HERO_ACTION_TIME[hero.id].attack);
     hero.atkCd = hero.stats.interval;
     hero.attackCount++;
     if (hero.id === "archer") {
@@ -315,7 +331,7 @@
 
   function castSkill(hero, target) {
     const level = state.skills[hero.id] || 1;
-    hero.action = "skill"; hero.actionT = .86;
+    setHeroAction(hero, "skill", HERO_ACTION_TIME[hero.id].skill);
     game.hitStop = Math.max(game.hitStop, .03);
     hero.skillCd = hero.stats.skillCd;
     if (game.report) game.report.skillsByHero[hero.id]++;
@@ -360,7 +376,7 @@
     hero.hp = Math.max(0, hero.hp - amount);
     hero.damageTaken += amount;
     if (game.report) game.report.takenByHero[hero.id] += amount;
-    hero.action = "hurt"; hero.actionT = .25;
+    setHeroAction(hero, "hurt", HERO_ACTION_TIME[hero.id].hurt);
     game.screenShake = Math.max(game.screenShake, special ? 4 : 1.5);
     addEffect("text", hero.x, GROUND - 75, `-${amount}`, "#ffb2b8", .65);
     if (hero.stats.counter && hero.counterCd <= 0 && L.rngNext(state) < .15 && attacker && !attacker.dead) {
@@ -369,7 +385,7 @@
       addEffect("text", attacker.x, GROUND - 108, "反击", "#ffdb8b", .7);
     }
     if (hero.hp <= 0) {
-      hero.down = true; hero.action = "down"; hero.actionT = 999;
+      hero.down = true; setHeroAction(hero, "down", 999);
       if (hero.id === "knight" && game.report && game.report.frontDownAt === null) game.report.frontDownAt = Math.round(game.stageTime * 10) / 10;
       addFeed(`${hero.def.name}倒下了`, "danger");
     }
@@ -406,7 +422,10 @@
   function updateHero(hero, dt) {
     if (hero.down) return;
     hero.actionT = Math.max(0, hero.actionT - dt);
-    if (hero.actionT <= 0) hero.action = game.phase === "march" ? "run" : "idle";
+    if (hero.actionT <= 0) {
+      hero.action = game.phase === "march" ? "run" : "idle";
+      hero.actionDuration = 0;
+    }
     hero.atkCd -= dt * (hero.inspiredT > 0 ? 1.05 : 1);
     hero.skillCd -= dt;
     hero.guardCd -= dt; hero.inspireCd -= dt; hero.counterCd -= dt; hero.inspiredT = Math.max(0, (hero.inspiredT || 0) - dt);
@@ -572,7 +591,7 @@
         toast(`幸运掉落：${legend.name}！`, "gold");
       }
     }
-    game.heroes.filter(h => !h.down).forEach(h => { h.action = "victory"; h.actionT = 3; });
+    game.heroes.filter(h => !h.down).forEach(h => setHeroAction(h, "victory", 3));
     addFeed(`通关！用时 ${game.stageTime.toFixed(1)} 秒`, "gold");
     toast(`第${game.stageId}关通关 · +${bonus}金币`, "gold");
     beep("win");
@@ -712,47 +731,159 @@
     }
   }
 
+  function clampUnit(value) { return Math.max(0, Math.min(1, value)); }
+  function easeInOut(value) { const t = clampUnit(value); return t * t * (3 - 2 * t); }
+  function easeOut(value) { const t = 1 - clampUnit(value); return 1 - t * t * t; }
+
+  function heroMotion(hero, time, actionProgress, runFrame) {
+    const phase = time * 2.35 + hero.homeX * .021;
+    const breath = Math.sin(phase);
+    const motion = { x: 0, y: -Math.max(0, breath) * .8, rotate: breath * .004, scaleX: 1 - breath * .003, scaleY: 1 + breath * .005, trail: 0, fx: 0, shadow: 1 };
+    if (hero.action === "run") {
+      const stride = Math.sin((runFrame / 8) * Math.PI * 2);
+      const lift = Math.abs(Math.sin((runFrame / 8) * Math.PI * 2));
+      motion.x = stride * 1.5;
+      motion.y = -lift * 3;
+      motion.rotate = stride * .012;
+      motion.scaleX = 1 + (1 - lift) * .008;
+      motion.scaleY = 1 - (1 - lift) * .012;
+      motion.shadow = 1 - lift * .12;
+      return motion;
+    }
+    if (hero.action === "attack" || hero.action === "skill") {
+      const skill = hero.action === "skill";
+      const lunge = { mage: skill ? 7 : 4, archer: skill ? 9 : 5, lancer: skill ? 22 : 17, knight: skill ? 19 : 14 }[hero.id];
+      const anticipation = skill ? .3 : .24;
+      const contact = skill ? .5 : .43;
+      if (actionProgress < anticipation) {
+        const t = easeInOut(actionProgress / anticipation);
+        motion.x = -5 * t;
+        motion.y = 2 * t;
+        motion.rotate = -.022 * t;
+        motion.scaleX = 1 - .018 * t;
+        motion.scaleY = 1 + .018 * t;
+      } else if (actionProgress < contact) {
+        const t = easeOut((actionProgress - anticipation) / (contact - anticipation));
+        motion.x = -5 + (lunge + 5) * t;
+        motion.y = -Math.sin(t * Math.PI) * (skill ? 5 : 3);
+        motion.rotate = -.022 + .045 * t;
+        motion.scaleX = 1 + Math.sin(t * Math.PI) * .035;
+        motion.scaleY = 1 - Math.sin(t * Math.PI) * .025;
+        motion.trail = .35 + t * .65;
+        motion.fx = t;
+        motion.shadow = 1 - Math.sin(t * Math.PI) * .16;
+      } else {
+        const t = clampUnit((actionProgress - contact) / (1 - contact));
+        const settle = Math.sin(t * Math.PI * 2.2) * Math.exp(-3.2 * t);
+        motion.x = lunge * (1 - easeOut(t)) + settle * 2;
+        motion.y = settle * -1.5;
+        motion.rotate = settle * .018;
+        motion.scaleX = 1 + settle * .012;
+        motion.scaleY = 1 - settle * .009;
+        motion.trail = Math.max(0, .52 - t) * .7;
+        motion.fx = Math.max(0, 1 - t * 1.65);
+      }
+      return motion;
+    }
+    if (hero.action === "hurt" || hero.down) {
+      const t = hero.down ? 1 : actionProgress;
+      const hit = Math.sin(Math.min(1, t * 1.8) * Math.PI);
+      motion.x = -9 * hit;
+      motion.y = hit * 2;
+      motion.rotate = -.035 * hit + (hero.down ? .92 : 0);
+      motion.scaleX = 1 - .045 * hit;
+      motion.scaleY = 1 + .035 * hit;
+      motion.shadow = 1 + .08 * hit;
+      return motion;
+    }
+    if (hero.action === "victory") {
+      const bounce = Math.max(0, Math.sin(time * 5.2 + hero.homeX * .03));
+      motion.y = -bounce * 5;
+      motion.rotate = Math.sin(time * 2.6 + hero.homeX) * .012;
+      motion.scaleX = 1 - bounce * .012;
+      motion.scaleY = 1 + bounce * .018;
+      motion.fx = .45 + bounce * .3;
+      motion.shadow = 1 - bounce * .15;
+    }
+    return motion;
+  }
+
+  function drawHeroFx(hero, column, x, y, size, alpha) {
+    if (!heroMotionFx.complete || !heroMotionFx.naturalWidth || alpha <= 0) return;
+    const row = { mage: 0, archer: 1, lancer: 2, knight: 3 }[hero.id];
+    const cellW = heroMotionFx.naturalWidth / 4;
+    const cellH = heroMotionFx.naturalHeight / 4;
+    ctx.save();
+    ctx.globalAlpha = Math.min(.72, alpha);
+    ctx.imageSmoothingEnabled = false;
+    ctx.drawImage(heroMotionFx, Math.round(column * cellW), Math.round(row * cellH), Math.round(cellW), Math.round(cellH), Math.round(x - size / 2), Math.round(y - size / 2), size, size);
+    ctx.restore();
+  }
+
   function drawHero(hero, time) {
-    const runFrame = Math.floor((time * 10 + hero.homeX * .017) % 8);
-    const runSteps = [-6, -4, 0, 4, 6, 4, 0, -4];
-    const runLift = [0, 2, 3, 1, 0, 2, 3, 1];
-    const actionMax = hero.action === "skill" ? .86 : .58;
-    const actionProgress = hero.action === "attack" || hero.action === "skill" ? 1 - Math.max(0, hero.actionT) / actionMax : 0;
-    const attackFrame = actionProgress < .2 ? 0 : actionProgress < .38 ? 1 : actionProgress < .5 ? 2 : actionProgress < .61 ? 3 : actionProgress < .69 ? 4 : actionProgress < .82 ? 5 : actionProgress < .93 ? 6 : 7;
+    const runFrame = Math.floor((time * 7.2 + hero.homeX * .013) % 8);
+    const runSteps = [-5, -3, 0, 4, 5, 3, 0, -4];
+    const duration = hero.actionDuration || HERO_ACTION_TIME[hero.id]?.[hero.action] || 1;
+    const actionProgress = ["attack", "skill", "hurt"].includes(hero.action) ? clampUnit(1 - Math.max(0, hero.actionT) / duration) : 0;
+    const attackFrame = actionProgress < .2 ? 0 : actionProgress < .36 ? 1 : actionProgress < .51 ? 2 : actionProgress < .64 ? 3 : actionProgress < .75 ? 4 : actionProgress < .86 ? 5 : actionProgress < .94 ? 6 : 7;
     const strike = (hero.action === "attack" || hero.action === "skill") && attackFrame >= 2 && attackFrame <= 4;
     const windup = (hero.action === "attack" || hero.action === "skill") && attackFrame < 2;
     const victory = hero.action === "victory";
-    const bob = hero.action === "run" ? runLift[runFrame] - 2 : victory ? Math.round(Math.abs(Math.sin(time * 4 + hero.homeX)) * -3) : Math.round(Math.sin(time * 3.2 + hero.homeX) * 1.2);
+    const motion = heroMotion(hero, time, actionProgress, runFrame);
+    const bob = Math.round(motion.y);
     const leg = hero.action === "run" ? runSteps[runFrame] : strike ? (hero.id === "lancer" ? 7 : 3) : windup ? -3 : 0;
     const clothLag = hero.action === "run" ? runSteps[(runFrame + 6) % 8] : strike ? -6 : 0;
-    const recoil = hero.action === "hurt" ? -4 : 0;
+    const recoil = Math.round(motion.x);
     const frames = spriteManifest[hero.id];
     const images = spriteImages[hero.id];
     if (frames && images) {
       let spriteIndex = 0;
       if (hero.down || hero.action === "hurt") spriteIndex = 5;
-      else if (hero.action === "run") spriteIndex = [1, 1, 2, 2, 1, 1, 2, 2][runFrame];
-      else if (hero.action === "skill") spriteIndex = attackFrame < 2 ? 3 : 4;
-      else if (hero.action === "attack") spriteIndex = attackFrame < 6 ? 3 : 0;
+      else if (hero.action === "run") spriteIndex = [0, 1, 1, 0, 0, 2, 2, 0][runFrame];
+      else if (hero.action === "skill") spriteIndex = actionProgress < .18 ? 0 : actionProgress < .39 ? 3 : actionProgress < .82 ? 4 : 0;
+      else if (hero.action === "attack") spriteIndex = actionProgress < .2 ? 0 : actionProgress < .78 ? 3 : 0;
       const frame = frames[spriteIndex], image = images[spriteIndex];
       if (image?.complete && image.naturalWidth) {
         const spriteScale = { mage: .32, archer: .32, lancer: .335, knight: .345 }[hero.id];
         const visualOffset = game.phase === "combat" && hero.id === "lancer" ? -18 : 0;
+        const baseX = Math.round(hero.x) + visualOffset;
+        const baseY = GROUND;
+        const drawPose = (offsetX, offsetY, alpha, scaleAdjust) => {
+          ctx.save();
+          ctx.translate(baseX + recoil + offsetX, baseY + bob + offsetY);
+          ctx.rotate(motion.rotate);
+          ctx.scale(motion.scaleX * scaleAdjust, motion.scaleY * scaleAdjust);
+          ctx.globalAlpha = alpha;
+          ctx.imageSmoothingEnabled = false;
+          ctx.drawImage(image, Math.round(-frame.anchorX * spriteScale), Math.round(-frame.anchorY * spriteScale), Math.round(frame.width * spriteScale), Math.round(frame.height * spriteScale));
+          ctx.restore();
+        };
         ctx.save();
-        ctx.translate(Math.round(hero.x) + recoil + visualOffset, GROUND + bob);
-        ctx.globalAlpha = hero.down ? .58 : 1;
-        ctx.imageSmoothingEnabled = false;
-        ctx.drawImage(
-          image,
-          Math.round(-frame.anchorX * spriteScale),
-          Math.round(-frame.anchorY * spriteScale),
-          Math.round(frame.width * spriteScale),
-          Math.round(frame.height * spriteScale)
-        );
+        ctx.globalAlpha = hero.down ? .16 : .24;
+        drawPixel(Math.round(baseX - 35 * motion.shadow), baseY - 2, Math.round(70 * motion.shadow), 6, "rgba(33,38,54,.72)");
+        drawPixel(Math.round(baseX - 23 * motion.shadow), baseY + 3, Math.round(46 * motion.shadow), 3, "rgba(33,38,54,.38)");
+        ctx.restore();
+        if (motion.trail > .08 && !hero.down) {
+          drawPose(-14 * motion.trail, 1, .07 * motion.trail, .985);
+          drawPose(-7 * motion.trail, 0, .13 * motion.trail, .992);
+        }
+        if (motion.fx > .05) {
+          const fxColumn = hero.action === "skill" || victory ? 3 : 1;
+          const fxX = baseX + recoil + (hero.id === "mage" ? 18 : 48);
+          const fxY = baseY - (hero.id === "mage" ? 79 : 54);
+          drawHeroFx(hero, fxColumn, fxX, fxY, hero.action === "skill" ? 116 : 92, motion.fx * .75);
+        }
+        if (hero.action === "run" && (runFrame === 0 || runFrame === 4)) {
+          const dustX = baseX - 23 + (runFrame === 4 ? 7 : 0);
+          drawPixel(dustX, baseY - 5, 9, 3, "rgba(242,225,190,.62)");
+          drawPixel(dustX - 5, baseY - 8, 5, 3, "rgba(242,225,190,.38)");
+        }
+        drawPose(0, hero.down ? 5 : 0, hero.down ? .58 : 1, 1);
+        ctx.save();
         if (!hero.down) {
           const hpW = 48, ratio = hero.hp / hero.stats.maxHp;
-          drawPixel(-24, -140, hpW, 6, "rgba(24,25,36,.62)");
-          drawPixel(-23, -139, Math.max(0, (hpW - 2) * ratio), 4, ratio < .3 ? "#f06f78" : "#78d989");
+          drawPixel(baseX - 24, baseY - 137, hpW, 6, "rgba(24,25,36,.62)");
+          drawPixel(baseX - 23, baseY - 136, Math.max(0, (hpW - 2) * ratio), 4, ratio < .3 ? "#f06f78" : "#78d989");
         }
         ctx.restore();
         return;

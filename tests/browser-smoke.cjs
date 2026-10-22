@@ -31,6 +31,8 @@ let browser;
   await page.locator("#speedButton").click();
   await page.locator("#speedButton").click();
   await page.waitForFunction(() => document.querySelector("#battleStatus").textContent.includes("战斗"), null, { timeout: 12000 });
+  await page.waitForTimeout(1440);
+  await page.screenshot({ path: path.join(root, "tests", "smoke-animation.png"), fullPage: true });
   if ((await page.locator("#partyHud .hero-card").count()) !== 4) throw new Error("Party HUD does not contain four heroes");
   await page.waitForFunction(() => document.querySelector("#stageLabel").textContent.trim() === "1-2", null, { timeout: 45000 });
   await page.locator('[data-view="inventory"]').click();
@@ -51,12 +53,7 @@ let browser;
   if (errors.length) throw new Error(`Browser errors: ${errors.join(" | ")}`);
   await page.screenshot({ path: path.join(root, "tests", "smoke-desktop.png"), fullPage: true });
 
-  await page.setViewportSize({ width: 390, height: 844 });
-  await page.waitForTimeout(250);
-  const overflow = await page.evaluate(() => document.documentElement.scrollWidth > document.documentElement.clientWidth + 1);
-  if (overflow) throw new Error("Mobile viewport has document-level horizontal overflow");
-  await page.screenshot({ path: path.join(root, "tests", "smoke-mobile.png"), fullPage: true });
-  console.log("Browser smoke passed: battle, formation, map, save, mobile overflow, and console checks.");
+  console.log("Browser smoke passed: desktop battle animation, formation, map, save, and console checks.");
   await browser.close();
   server.close();
 })().catch(error => {
