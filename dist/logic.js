@@ -2,11 +2,11 @@
   "use strict";
 
   const SAVE_KEY = "starwish_demo_save_v1";
-  const SAVE_VERSION = 2;
+  const SAVE_VERSION = 3;
 
   const CHARACTERS = {
-    mage: { id: "mage", name: "星璃", title: "星术师", weapon: "book", weaponName: "魔导书", icon: "✦", hp: 145, atk: 24, def: 4, interval: 1.8, crit: .05, range: 320, hpGrowth: 9, atkGrowth: 2.2, skill: "星屑风暴", skillCd: 10, skillBase: 1.4, color: "#a98ee8" },
-    archer: { id: "archer", name: "叶音", title: "森林游侠", weapon: "bow", weaponName: "弓", icon: "➶", hp: 155, atk: 18, def: 5, interval: 1.2, crit: .17, range: 360, hpGrowth: 10, atkGrowth: 1.7, skill: "星羽连射", skillCd: 9, skillBase: 2.25, color: "#61bd82" },
+    mage: { id: "mage", name: "星璃", title: "星术师", weapon: "book", weaponName: "魔导书", icon: "✦", hp: 145, atk: 24, def: 4, interval: 1.8, crit: .05, range: 270, hpGrowth: 9, atkGrowth: 2.2, skill: "星屑风暴", skillCd: 10, skillBase: 1.4, color: "#a98ee8" },
+    archer: { id: "archer", name: "叶音", title: "森林游侠", weapon: "bow", weaponName: "弓", icon: "➶", hp: 155, atk: 18, def: 5, interval: 1.2, crit: .17, range: 200, hpGrowth: 10, atkGrowth: 1.7, skill: "星羽连射", skillCd: 9, skillBase: 2.25, color: "#61bd82" },
     lancer: { id: "lancer", name: "希娅", title: "疾风枪姬", weapon: "spear", weaponName: "长枪", icon: "♢", hp: 210, atk: 20, def: 9, interval: 1.45, crit: .08, range: 72, hpGrowth: 15, atkGrowth: 2, skill: "疾风连刺", skillCd: 7, skillBase: 1.95, color: "#e87b9c" },
     knight: { id: "knight", name: "露米", title: "星辉剑士", weapon: "sword", weaponName: "单手剑", icon: "⚔", hp: 260, atk: 22, def: 16, interval: 1.35, crit: .05, range: 40, hpGrowth: 18, atkGrowth: 2, skill: "星花斩", skillCd: 8, skillBase: 1.6, color: "#62a2e2" }
   };
@@ -118,6 +118,7 @@
       equipment: { mage: {}, archer: {}, lancer: {}, knight: {} },
       inventory: [],
       firstClears: {},
+      highestClearedStage: 0,
       bestTimes: {},
       history: {},
       pity: { epic: 0, legendary: 0 },
@@ -128,6 +129,8 @@
       lastBattleReport: null,
       failures: 0,
       lastStableStage: 1,
+      pendingLegendaryChoice: false,
+      legendaryRewardClaimed: false,
       offlineRemainder: 0,
       lastSeen: Date.now(),
       totalKills: 0,
@@ -177,19 +180,33 @@
     out.unlockedStage = clamp(Number(out.unlockedStage) || 1, 1, 10);
     out.currentStage = clamp(Number(out.currentStage) || 1, 1, out.unlockedStage);
     out.lastSeen = Number(out.lastSeen) || Date.now();
-    out.idlePlan = ["progress", "gear", "materials", "boss"].includes(out.idlePlan) ? out.idlePlan : "progress";
+    out.idlePlan = out.idlePlan === "materials" ? "gear" : (["progress", "gear", "boss"].includes(out.idlePlan) ? out.idlePlan : "progress");
     out.planStage = clamp(Number(out.planStage) || out.currentStage, 1, out.unlockedStage);
     out.lootFocus = ["all", "weapon", "armor", "accessory"].includes(out.lootFocus) ? out.lootFocus : "all";
+    out.highestClearedStage = clamp(Number(out.highestClearedStage) || Object.keys(out.firstClears || {}).filter(k => out.firstClears[k]).reduce((m, k) => Math.max(m, Number(k) || 0), 0), 0, 10);
+    out.lastStableStage = clamp(Number(out.lastStableStage) || 1, 1, Math.max(1, out.unlockedStage));
+    // V0.7 did not persist the stage-10 choice dialog. A legacy save that has
+    // cleared the boss but owns no legendary is safely resumed at the choice.
+    if (Number(input.version || 1) < 3 && out.firstClears?.[10]) {
+      const owned = out.inventory.some(item => item?.legendaryId) || Object.values(out.equipment).some(slots => Object.values(slots || {}).some(item => item?.legendaryId));
+      out.legendaryRewardClaimed = owned;
+      out.pendingLegendaryChoice = !owned;
+    } else {
+      out.legendaryRewardClaimed = !!out.legendaryRewardClaimed;
+      out.pendingLegendaryChoice = !!out.pendingLegendaryChoice && !out.legendaryRewardClaimed;
+    }
+    out.lastStableStage = stableStageFor(out);
     out.version = SAVE_VERSION;
     return out;
   }
 
   function qualityById(id) { return QUALITIES.find(q => q.id === id) || QUALITIES[0]; }
 
-  function chooseQuality(state, forcedMin) {
+  function chooseQuality(state, forcedMin, affectsPity) {
+    const trackPity = affectsPity !== false;
     let idx = 0;
-    if (state.pity.legendary >= 180) idx = 4;
-    else if (state.pity.epic >= 40) idx = 3;
+    if (trackPity && state.pity.legendary >= 180) idx = 4;
+    else if (trackPity && state.pity.epic >= 40) idx = 3;
     else {
       const roll = rngNext(state);
       let acc = 0;
@@ -199,8 +216,10 @@
       }
     }
     if (forcedMin) idx = Math.max(idx, QUALITIES.findIndex(q => q.id === forcedMin));
-    state.pity.epic = idx >= 3 ? 0 : state.pity.epic + 1;
-    state.pity.legendary = idx >= 4 ? 0 : state.pity.legendary + 1;
+    if (trackPity) {
+      state.pity.epic = idx >= 3 ? 0 : state.pity.epic + 1;
+      state.pity.legendary = idx >= 4 ? 0 : state.pity.legendary + 1;
+    }
     return QUALITIES[idx];
   }
 
@@ -211,7 +230,7 @@
     let charId = options.charId || (slot === "weapon" ? pick(state, Object.keys(CHARACTERS)) : null);
     let legendary = options.legendaryId ? Object.values(LEGENDARIES).find(x => x.id === options.legendaryId) : null;
     if (legendary) { slot = "weapon"; charId = legendary.charId; }
-    let quality = legendary ? qualityById("legendary") : chooseQuality(state, options.minQuality);
+    let quality = legendary ? qualityById("legendary") : chooseQuality(state, options.minQuality, options.affectsPity);
     if (quality.id === "legendary" && !legendary) legendary = LEGENDARIES[charId || pick(state, Object.keys(CHARACTERS))];
     if (legendary) { charId = legendary.charId; slot = "weapon"; }
     const char = charId ? CHARACTERS[charId] : null;
@@ -438,19 +457,40 @@
     };
   }
 
+  function recentStageStats(state, stage) {
+    const recent = (state.history?.[stage] || []).slice(-10);
+    const wins = recent.filter(run => run.success);
+    const timedOut = recent.some(run => run.timeout);
+    const winRate = recent.length ? wins.length / recent.length : 0;
+    const times = wins.map(run => Number(run.seconds)).filter(value => Number.isFinite(value) && value > 0 && value <= 240).sort((a, b) => a - b);
+    const trimmed = times.length >= 5 ? times.slice(1, -1) : times;
+    const average = trimmed.length ? trimmed.reduce((sum, value) => sum + value, 0) / trimmed.length : null;
+    return { samples: recent.length, wins: wins.length, winRate, timedOut, average: average ? Math.round(average * 10) / 10 : null };
+  }
+
+  function stableStageFor(state) {
+    let verified = 0;
+    for (let stage = 1; stage <= 10; stage++) {
+      const stats = recentStageStats(state, stage);
+      if (stats.samples >= 10 && stats.wins >= 9 && !stats.timedOut) verified = stage;
+    }
+    if (verified) return verified;
+    // Until a ten-run sample exists, stay one stage below the highest clear.
+    // This avoids turning a lucky boss clear into an unsafe offline assignment.
+    return clamp(Math.max(1, (state.highestClearedStage || 1) - 1), 1, 10);
+  }
+
   function recordRun(state, stage, success, seconds, report) {
     if (!state.history[stage]) state.history[stage] = [];
-    state.history[stage].push({ success: !!success, seconds: Math.round(seconds * 10) / 10, at: Date.now() });
+    const timeout = !success && /超时|时间/.test(report?.reason || "");
+    state.history[stage].push({ success: !!success, timeout, seconds: Math.round(seconds * 10) / 10, at: Date.now() });
     state.history[stage] = state.history[stage].slice(-10);
     if (success) {
       state.totalClears++;
-      // When ten-run stability data is not available yet, the most recent
-      // normal clear is the documented safe fallback.
-      state.lastStableStage = Math.max(state.lastStableStage || 1, Number(stage));
+      state.highestClearedStage = Math.max(state.highestClearedStage || 0, Number(stage));
       if (!state.bestTimes[stage] || seconds < state.bestTimes[stage]) state.bestTimes[stage] = Math.round(seconds * 10) / 10;
-      const recent = state.history[stage];
-      if (recent.length >= 3 && recent.filter(x => x.success).length / recent.length >= .9) state.lastStableStage = Math.max(state.lastStableStage, stage);
     }
+    state.lastStableStage = stableStageFor(state);
     if (report) state.lastBattleReport = report;
     if (Number(stage) === 10 && report) {
       state.bossRecords.bestDamage = Math.max(state.bossRecords.bestDamage || 0, report.totalDamage || 0);
@@ -459,6 +499,23 @@
         if (!state.bossRecords.bestTime || seconds < state.bossRecords.bestTime) state.bossRecords.bestTime = Math.round(seconds * 10) / 10;
       }
     }
+  }
+
+  function prepareLegendaryChoice(state) {
+    if (state.legendaryRewardClaimed) return false;
+    state.pendingLegendaryChoice = true;
+    return true;
+  }
+
+  function claimLegendaryChoice(state, legendaryId) {
+    if (!state.pendingLegendaryChoice || state.legendaryRewardClaimed) return { ok: false, reason: "这份首通奖励已经领取。" };
+    const legendary = Object.values(LEGENDARIES).find(item => item.id === legendaryId);
+    if (!legendary) return { ok: false, reason: "传说装备选择无效。" };
+    const item = generateItem(state, 10, { legendaryId, affectsPity: false });
+    const added = addItem(state, item);
+    state.pendingLegendaryChoice = false;
+    state.legendaryRewardClaimed = true;
+    return { ok: true, item, added };
   }
 
   function itemDropSource(item) {
@@ -474,15 +531,19 @@
     state.lastSeen = now;
     if (delta < 60000 || delta < 0) return delta < 0 ? { invalidTime: true } : null;
     const seconds = Math.min(delta / 1000, 8 * 3600);
-    const stage = clamp(state.lastStableStage || Math.max(1, state.unlockedStage - 1), 1, 10);
-    const average = Math.max(55, Number(state.bestTimes[stage]) || (75 + stage * 4));
-    const clearsFloat = seconds * .8 / average + (state.offlineRemainder || 0);
+    const bossPlan = state.idlePlan === "boss" && state.unlockedStage >= 10;
+    const stage = bossPlan ? 10 : clamp(stableStageFor(state), 1, 10);
+    const stageStats = recentStageStats(state, stage);
+    const average = Math.max(55, stageStats.average || (75 + stage * 4));
+    const winRate = stageStats.samples ? clamp(stageStats.winRate, .5, 1) : .8;
+    const efficiency = .8 * winRate;
+    const clearsFloat = seconds * efficiency / average + (state.offlineRemainder || 0);
     const clears = Math.floor(clearsFloat);
     state.offlineRemainder = clearsFloat - clears;
     if (clears < 1) return null;
     const stageDef = STAGES[stage - 1];
     const enemyCodes = stageDef.waves.flat();
-    let gold = 0, xp = 0, equipment = 0, salvaged = 0;
+    let gold = 0, xp = 0, equipment = 0, salvaged = 0, shards = 0;
     const simulatedClears = Math.min(clears, 500);
     for (let c = 0; c < simulatedClears; c++) {
       enemyCodes.forEach(code => {
@@ -491,7 +552,7 @@
         xp += reward.xp;
         const guaranteed = code === "E" || code === "B";
         if (guaranteed || rngNext(state) < .18) {
-          const item = generateItem(state, stage, { minQuality: code === "E" || code === "B" ? "rare" : null });
+          const item = generateItem(state, stage, { minQuality: guaranteed ? "rare" : null, affectsPity: !guaranteed });
           const result = addItem(state, item);
           if (result.kept) equipment++; else salvaged += result.gold || 0;
         }
@@ -505,8 +566,12 @@
       xp += perClearXp * scale;
     }
     state.gold += gold;
+    if (bossPlan) {
+      shards = clears;
+      state.shards += shards;
+    }
     const levels = addExperience(state, xp);
-    return { seconds, stage, clears, gold: gold + salvaged, xp, equipment, salvaged, levels };
+    return { seconds, stage, clears, gold: gold + salvaged, xp, equipment, salvaged, levels, shards, average, winRate, efficiency, bossPlan };
   }
 
   function save(state) {
@@ -528,7 +593,7 @@
     SAVE_KEY, SAVE_VERSION, CHARACTERS, ENEMIES, STAGES, QUALITIES, AFFIXES, LEGENDARIES, SLOT_NAMES, SLOT_ICONS, TACTICS,
     clamp, xpNeeded, hpMultiplier, atkMultiplier, damage, freshState, normalizeState, rngNext, qualityById,
     generateItem, addItem, itemAffixDetails, characterStats, compareItem, equipItem, salvageItem, savePreset, applyPreset, addExperience, skillCost, upgradeSkill,
-    rewardForEnemy, recordRun, itemDropSource, calculateOffline, save, load, exportSave, importSave
+    rewardForEnemy, recentStageStats, stableStageFor, recordRun, prepareLegendaryChoice, claimLegendaryChoice, itemDropSource, calculateOffline, save, load, exportSave, importSave
   };
 
   global.StarwishLogic = API;

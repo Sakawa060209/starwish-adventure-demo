@@ -35,6 +35,11 @@ let browser;
   await page.screenshot({ path: path.join(root, "tests", "smoke-animation.png"), fullPage: true });
   if ((await page.locator("#partyHud .hero-card").count()) !== 4) throw new Error("Party HUD does not contain four heroes");
   await page.waitForFunction(() => document.querySelector("#stageLabel").textContent.trim() === "1-2", null, { timeout: 45000 });
+  const participation = await page.evaluate(() => {
+    const save = JSON.parse(localStorage.getItem("starwish_demo_save_v1"));
+    return Object.keys(save.lastBattleReport.attacksByHero).map(id => ({ id, attacks: save.lastBattleReport.attacksByHero[id], damage: save.lastBattleReport.damageByHero[id] }));
+  });
+  if (participation.some(hero => hero.attacks < 1 || hero.damage < 1)) throw new Error(`A hero did not participate in combat: ${JSON.stringify(participation)}`);
   await page.locator('[data-view="inventory"]').click();
   if ((await page.locator(".item-slot").count()) < 1) throw new Error("First clear did not award equipment");
   if ((await page.locator(".gear-sprite").count()) < 1) throw new Error("Pixel equipment icons were not rendered");

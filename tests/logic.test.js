@@ -114,20 +114,71 @@ test("normalization repairs malformed formation and keeps compatible progress", 
   assert.equal(normalized.version, L.SAVE_VERSION);
 });
 
-test("a successful first clear becomes the safe fallback without ten samples", () => {
+test("a single lucky clear uses the conservative previous-stage fallback", () => {
   const state = L.freshState(63);
   L.recordRun(state, 8, true, 72);
-  assert.equal(state.lastStableStage, 8);
+  assert.equal(state.lastStableStage, 7);
   assert.equal(state.history[8].length, 1);
 });
 
-test("v2 migration supplies idle plans, protected affixes, presets, and boss records", () => {
+test("v3 migration supplies idle plans, protected affixes, presets, and boss records", () => {
   const state = L.normalizeState({ version: 1, level: 4, settings: { autoCommon: true } });
-  assert.equal(state.version, 2);
+  assert.equal(state.version, 3);
   assert.equal(state.idlePlan, "progress");
   assert.deepEqual(Object.keys(state.presets).sort(), ["boss", "farm"]);
   assert.ok(state.settings.protectedAffixes.includes("synergy"));
   assert.equal(state.bossRecords.wins, 0);
+});
+
+test("stable stage requires nine wins in ten and no timeout", () => {
+  const state = L.freshState(64);
+  for (let i = 0; i < 10; i++) L.recordRun(state, 6, i !== 3, 70 + i, i === 3 ? { reason: "队伍倒下" } : null);
+  assert.equal(state.lastStableStage, 6);
+  L.recordRun(state, 7, false, 90, { reason: "战斗超时" });
+  for (let i = 0; i < 9; i++) L.recordRun(state, 7, true, 75 + i);
+  assert.equal(state.lastStableStage, 6);
+  assert.equal(L.recentStageStats(state, 7).timedOut, true);
+});
+
+test("forced rewards do not advance or reset normal pity", () => {
+  const state = L.freshState(65);
+  state.pity = { epic: 17, legendary: 31 };
+  L.generateItem(state, 7, { minQuality: "epic", affectsPity: false });
+  assert.deepEqual(state.pity, { epic: 17, legendary: 31 });
+  L.generateItem(state, 7);
+  assert.notDeepEqual(state.pity, { epic: 17, legendary: 31 });
+});
+
+test("stage-ten legendary choice survives reload and can only be claimed once", () => {
+  const state = L.freshState(66);
+  assert.equal(L.prepareLegendaryChoice(state), true);
+  const restored = L.normalizeState(JSON.parse(JSON.stringify(state)));
+  assert.equal(restored.pendingLegendaryChoice, true);
+  const first = L.claimLegendaryChoice(restored, "star-sword");
+  assert.equal(first.ok, true);
+  assert.equal(restored.inventory.filter(item => item.legendaryId === "star-sword").length, 1);
+  assert.equal(L.claimLegendaryChoice(restored, "star-sword").ok, false);
+  assert.equal(restored.inventory.filter(item => item.legendaryId === "star-sword").length, 1);
+});
+
+test("legacy cleared boss save without a legendary resumes the missing choice", () => {
+  const state = L.normalizeState({ version: 2, firstClears: { 10: true }, unlockedStage: 10 });
+  assert.equal(state.pendingLegendaryChoice, true);
+  assert.equal(state.legendaryRewardClaimed, false);
+});
+
+test("boss offline plan grants shards and reports measured efficiency", () => {
+  const state = L.freshState(67);
+  state.unlockedStage = 10;
+  state.idlePlan = "boss";
+  for (let i = 0; i < 10; i++) L.recordRun(state, 10, true, 70 + i);
+  state.lastSeen = 1_000_000;
+  const reward = L.calculateOffline(state, state.lastSeen + 3600_000);
+  assert.equal(reward.stage, 10);
+  assert.equal(reward.bossPlan, true);
+  assert.equal(reward.shards, reward.clears);
+  assert.ok(reward.average >= 70 && reward.average <= 80);
+  assert.ok(reward.efficiency > 0);
 });
 
 test("protected synergy gear survives auto salvage and exposes comparison data", () => {
